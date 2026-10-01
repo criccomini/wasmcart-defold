@@ -91,8 +91,8 @@ A manifest `width`/`height` is the cart author stating the size the cart wants,
 and the runtime adopts it as its resolution.
 
 Worked examples, a `build-cart.sh` that encodes all of the above, and a
-migration script for pre-1.13 projects live in
-[wasmcart-defold-examples](https://github.com/wasmcart/wasmcart-defold-examples).
+migration script for pre-1.13 projects live in `wasmcart-defold-examples`
+(not yet published).
 
 ## How this repo is organised
 
@@ -125,6 +125,34 @@ and the host clock are all wired.
 
 `wc_get_info` is idempotent: a host may call it again after `wc_init` to pick up
 the resolved resolution, and some do.
+
+## Related
+
+The cart format and its reference host:
+
+- [wasmcart](https://github.com/wasmcart/wasmcart) - the `.wasc` format, the
+  spec, and the JS reference host
+- [wasmcart-native](https://github.com/wasmcart/wasmcart-native) - standalone
+  C++ player on libnode/V8, SDL2 and EGL
+- [wasmcart-libretro](https://github.com/wasmcart/wasmcart-libretro) - carts as
+  a RetroArch core
+- [wasmcart-android](https://github.com/wasmcart/wasmcart-android) - standalone
+  Android player
+
+Other engines and languages targeting the same format:
+
+- [wasmcart-godot](https://github.com/wasmcart/wasmcart-godot) - Godot 4, the
+  closest sibling to this repo
+- [wasmcart-lua](https://github.com/wasmcart/wasmcart-lua) - Lua 5.4 with a
+  LOVE-style API
+- [wasmcart-rust](https://github.com/wasmcart/wasmcart-rust),
+  [wasmcart-zig](https://github.com/wasmcart/wasmcart-zig),
+  [wasmcart-pygame](https://github.com/wasmcart/wasmcart-pygame),
+  [wasmcart-mruby](https://github.com/wasmcart/wasmcart-mruby)
+- [wasmcart-sdl2](https://github.com/wasmcart/wasmcart-sdl2) - porting toolkit
+  for existing C/SDL2 games
+
+Upstream: [defold/defold](https://github.com/defold/defold).
 
 ## Licence
 
