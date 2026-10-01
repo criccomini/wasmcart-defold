@@ -296,6 +296,15 @@ static android_LogPriority ToAndroidPriority(LogSeverity severity)
 }
 #endif
 
+#if defined(DM_PLATFORM_WASMCART)
+#ifdef __wasm__
+__attribute__((import_module("env"), import_name("wc_log")))
+extern "C" void wc_log(const char* ptr, unsigned int len);
+#else
+extern "C" void wc_log(const char* ptr, unsigned int len) { (void)ptr; (void)len; }
+#endif
+#endif
+
 #if !defined(_WIN32) && !defined(_GAMING_XBOX)
 void DoLogPlatform(LogSeverity severity, const char* output, int output_len)
 {
@@ -307,7 +316,15 @@ void DoLogPlatform(LogSeverity severity, const char* output, int output_len)
     dmLog::__ios_log_print(severity, output);
 #endif
 
-#ifdef __EMSCRIPTEN__
+#if defined(DM_PLATFORM_WASMCART)
+
+    // A cart has no console and no JS glue: engine logs go to the host
+    // through wc_log, which is how anything the engine says during startup
+    // becomes visible at all.
+    (void) severity;
+    wc_log(output, (unsigned int) output_len);
+
+#elif defined(__EMSCRIPTEN__)
 
     //Emscripten maps stderr to console.error and stdout to console.log.
     if (severity == LOG_SEVERITY_ERROR || severity == LOG_SEVERITY_FATAL)
@@ -661,10 +678,18 @@ void LogInternal(LogSeverity severity, const char* domain, const char* format, .
 
     // In release mode, if there are no custom listeners, and no log.txt file, we'll return here
     bool is_debug_mode = dLib::IsDebugMode();
+#if !defined(DM_PLATFORM_WASMCART)
+    // On a cart the host's wc_log IS the listener -- it is wired
+    // unconditionally in DoLogPlatform -- so this early return would silence
+    // every engine message including the fatal ones. A shipping cart that
+    // wants silence sets project.minimum_log_level, which the severity check
+    // above already honours; this only removes the "release implies no
+    // listener" assumption, which is false when the host is the listener.
     if (!is_debug_mode && !dmLog::g_LogFile && (dmAtomicGet32(&dmLog::g_ListenersCount) == 0))
     {
         return;
     }
+#endif
 
     va_list lst;
     va_start(lst, format);
@@ -716,10 +741,17 @@ void LogInternal(LogSeverity severity, const char* domain, const char* format, .
 
     // Could potentially be moved to the thread, but these are already thread safe, and
     // I think it's good to output info directly to the native platform as soon as possible.
+#if defined(DM_PLATFORM_WASMCART)
+    // wc_log is the cart's only output channel, and a cart runtime is built
+    // from the release variant, where SetDebugMode(false) would silence even
+    // dmLogFatal. The host decides what to do with the text.
+    dmLog::DoLogPlatform(severity, str_buf, actual_n);
+#else
     if (is_debug_mode)
     {
         dmLog::DoLogPlatform(severity, str_buf, actual_n);
     }
+#endif
 
     if (dmLog::g_LogFile && dmLog::g_TotalBytesLogged < dmLog::MAX_LOG_FILE_SIZE)
     {

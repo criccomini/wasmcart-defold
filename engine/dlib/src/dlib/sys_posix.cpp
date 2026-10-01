@@ -108,12 +108,16 @@ namespace dmSysPosix
         info->m_GmtOffset = lt->tm_gmtoff / 60;
     }
 
+#if !defined(DM_PLATFORM_WASMCART)
     bool ResourceExists(const char* path)
     {
         struct stat file_stat;
         return stat(path, &file_stat) == 0;
     }
+#endif
 
+
+#if !defined(DM_PLATFORM_WASMCART)
     dmSys::Result ResourceSize(const char* path, uint32_t* resource_size)
     {
         struct stat file_stat;
@@ -127,7 +131,10 @@ namespace dmSysPosix
             return dmSys::RESULT_NOENT;
         }
     }
+#endif
 
+
+#if !defined(DM_PLATFORM_WASMCART)
     dmSys::Result LoadResource(const char* path, void* buffer, uint32_t buffer_size, uint32_t* resource_size)
     {
         *resource_size = 0;
@@ -156,7 +163,10 @@ namespace dmSysPosix
             return dmSys::ErrnoToResult(errno);
         }
     }
+#endif
 
+
+#if !defined(DM_PLATFORM_WASMCART)
     dmSys::Result LoadResourcePartial(const char* path, uint32_t offset, uint32_t size, void* buffer, uint32_t* nread)
     {
         if (buffer == 0 || size == 0)
@@ -195,6 +205,8 @@ namespace dmSysPosix
         }
         return dmSys::RESULT_OK;
     }
+#endif
+
 
     dmSys::Result Rmdir(const char* path)
     {
@@ -223,12 +235,15 @@ namespace dmSysPosix
         return path_stat.st_mode & S_IFDIR ? dmSys::RESULT_OK : dmSys::RESULT_UNKNOWN;
     }
 
+#if !defined(DM_PLATFORM_WASMCART)
     bool Exists(const char* path)
     {
         struct stat path_stat;
         int ret = stat(path, &path_stat);
         return ret == 0;
     }
+#endif
+
 
     dmSys::Result IterateTree(const char* dirpath, bool recursive, bool call_before, void* ctx, void (*callback)(void* ctx, const char* path, bool isdir))
     {

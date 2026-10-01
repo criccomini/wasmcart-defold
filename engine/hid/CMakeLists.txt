@@ -52,11 +52,27 @@ else()
         "${HID_SRC_DIR}/native/*.c"
         "${HID_SRC_DIR}/native/*.cpp"
         "${HID_SRC_DIR}/native/*.mm")
+    # A cart build uses the wasmcart pad driver, never the GLFW one: a cart has
+    # no GLFW joystick API to call, so leaving it in the glob is not merely
+    # dead code, it fails to compile.
+    if(DEFOLD_WASMCART)
+        list(REMOVE_ITEM _hid_native_sources
+            "${HID_SRC_DIR}/native/hid_gamepad_driver_glfw.cpp")
+    else()
+        list(REMOVE_ITEM _hid_native_sources
+            "${HID_SRC_DIR}/native/hid_gamepad_driver_wasmcart.cpp")
+    endif()
     list(APPEND hid_SOURCES ${_hid_native_sources})
 endif()
 
 defold_add_library(hid STATIC ${hid_SOURCES})
 target_compile_definitions(hid PRIVATE "DLIB_LOG_DOMAIN=\"HID\"")
+if(DEFOLD_WASMCART)
+    # Selects the wasmcart pad driver in InitializeGamepads, and lets the
+    # driver see the cart window backend's pad accessors.
+    target_compile_definitions(hid PRIVATE DM_PLATFORM_WASMCART)
+    target_include_directories(hid PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../platform/src")
+endif()
 if(TARGET_PLATFORM MATCHES "^(arm64-macos|x86_64-macos|arm64-ios|arm64_sim-ios)$")
     target_link_libraries(hid PUBLIC "-framework GameController")
 endif()

@@ -4,6 +4,23 @@ if(NOT TARGET_PLATFORM MATCHES "^(wasm-web|wasm_pthread-web)$")
   message(FATAL_ERROR "platform_html5.cmake included for non-web TARGET_PLATFORM: ${TARGET_PLATFORM}")
 endif()
 
+if(DEFOLD_WASMCART)
+  # sys_wasmcart.cpp provides ResolveMountFileName against the cart's asset
+  # imports; this keeps sys.cpp from defining it too.
+  # DM_HAS_NO_GETENV: a cart has no environment, and every getenv() call site
+  # drags in emscripten's environ_get/environ_sizes_get WASI imports for a
+  # lookup that can only return null.
+  target_compile_definitions(defold_sdk INTERFACE DM_SYS_CUSTOM_HOST_PATHS DM_PLATFORM_WASMCART DM_HAS_NO_GETENV)
+
+  # setjmp/longjmp must be wasm-native, not emscripten's JS trampolines.
+  # dmConfigFile's parser longjmps out of an error, and the default lowering
+  # imports _emscripten_throw_longjmp plus invoke_* from JS -- which a cart
+  # host does not provide, so the jump never unwinds and the parser spins.
+  # Must be set for BOTH compile and link.
+  target_compile_options(defold_sdk INTERFACE -sSUPPORT_LONGJMP=wasm)
+  target_link_options(defold_sdk INTERFACE -sSUPPORT_LONGJMP=wasm)
+endif()
+
 # Common compile-time definitions (mirrors waf_dynamo for web)
 target_compile_definitions(defold_sdk INTERFACE
   GL_ES_VERSION_2_0
@@ -55,14 +72,24 @@ set(_DEFOLD_EM_LINK_OPTS
   -sDISABLE_EXCEPTION_CATCHING=1
   -sALLOW_UNIMPLEMENTED_SYSCALLS=0
   -sEXPORTED_RUNTIME_METHODS=["ccall","UTF8ToString","callMain","HEAPU8","stringToNewUTF8"]
-  -sEXPORTED_FUNCTIONS=_main,_malloc,_free
-  -sERROR_ON_UNDEFINED_SYMBOLS=1
   -sINITIAL_MEMORY=${_DEFOLD_INITIAL_MEMORY}
   -sMAX_WEBGL_VERSION=2
   -sGL_SUPPORT_AUTOMATIC_ENABLE_EXTENSIONS=0
-  -sIMPORTED_MEMORY=1
   -sSTACK_SIZE=5MB
 )
+
+# A cart exports the wasmcart ABI instead of main(), and leaves its host
+# imports undefined for the host to supply at instantiation. Both of these
+# would break that, so they are only added for a normal web build.
+if(NOT DEFOLD_WASMCART)
+  list(APPEND _DEFOLD_EM_LINK_OPTS
+    -sEXPORTED_FUNCTIONS=_main,_malloc,_free
+    -sERROR_ON_UNDEFINED_SYMBOLS=1
+    # The JS loader creates the Memory and passes it in. A cart has no loader:
+    # the host instantiates the module directly, so the cart owns and exports
+    # its memory instead of importing one.
+    -sIMPORTED_MEMORY=1)
+endif()
 
 # Browser minimum versions
 if(_DEFOLD_WITH_PTHREAD)

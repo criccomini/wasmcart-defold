@@ -500,6 +500,11 @@ function(engine_add_binary target)
   endif()
 endfunction()
 
+# A DEFOLD_WASMCART configure retargets `platform` to the cart window backend,
+# so the stock engine binaries (which also link platform_null) cannot be built
+# in the same configure. It is a cart build or a normal build, not both.
+if(NOT DEFOLD_WASMCART)
+
 set(ENGINE_DMENGINE_SYMBOLS
   ${ENGINE_EXPORTED_SYMBOLS}
   ${ENGINE_PROFILE_SYMBOLS}
@@ -550,6 +555,55 @@ if(COMMAND defold_bundle_target)
 endif()
 defold_codesign_target(dmengine_headless darwin/entitlements-macos-debug.plist)
 
+endif() # NOT DEFOLD_WASMCART
+
+# dmengine_wasmcart: the engine as a wasmcart cartridge.
+#
+# Same engine, same libraries. Two differences: the entry point is the cart
+# shim (wc_get_info/wc_init/wc_render) instead of main(), and the platform
+# and graphics backends are the cart ones. Built as a standalone wasm module
+# with no JS glue and no entry point.
+if(TARGET_PLATFORM_OS STREQUAL "web" AND DEFOLD_WASMCART)
+  set(ENGINE_WASMCART_EXPORTS "${CMAKE_CURRENT_BINARY_DIR}/__exported_symbols_dmengine_wasmcart.cpp")
+  # Same symbol set as dmengine_release: the cart links profile_null /
+  # profilerext_null, so the ProfilerBasic and ProfilerJS symbols that
+  # ENGINE_PROFILE_SYMBOLS names do not exist in this binary.
+  set(ENGINE_WASMCART_SYMBOLS
+    ${ENGINE_EXPORTED_SYMBOLS}
+    ${ENGINE_RESOURCE_SYMBOLS}
+    ResourceProviderHttp
+    ${ENGINE_COMPONENT_SYMBOLS})
+  defold_create_exported_symbols_file("${ENGINE_WASMCART_EXPORTS}" "${ENGINE_WASMCART_SYMBOLS}")
+
+  # The cart shim replaces common/main.cpp -- a cart has no main().
+  defold_add_executable(dmengine_wasmcart
+    "${ENGINE_SRC_DIR}/wasmcart/wasmcart_main.cpp"
+    "${ENGINE_WASMCART_EXPORTS}")
+
+  # graphics_wasmcart pulls platform_wasmcart transitively, so the cart
+  # backends win over the GLFW ones.
+  # `graphics` and `platform` already ARE the cart backends in a
+  # DEFOLD_WASMCART configure, so no per-target override is needed here.
+  engine_configure_executable(dmengine_wasmcart release engine_release engine_service_null graphics "profile_null;profilerext_null" "ProfilerExt")
+
+  target_compile_definitions(dmengine_wasmcart PRIVATE DM_PLATFORM_WASMCART)
+  target_include_directories(dmengine_wasmcart PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../platform/src")
+
+  # Standalone wasm: no JS glue, no entry point, only the cart ABI exported.
+  # platform_html5.cmake already omits the _main export and the
+  # undefined-symbol error for a DEFOLD_WASMCART configure, so only the
+  # cart-specific flags are added here.
+  target_link_options(dmengine_wasmcart PRIVATE
+    -sSTANDALONE_WASM=1
+    --no-entry
+    -sERROR_ON_UNDEFINED_SYMBOLS=0
+    -sEXPORTED_FUNCTIONS=_wc_get_info,_wc_init,_wc_render
+    -sALLOW_MEMORY_GROWTH=1)
+
+  set_target_properties(dmengine_wasmcart PROPERTIES SUFFIX ".wasm")
+endif()
+
+
 if(TARGET_PLATFORM MATCHES "^(arm64-android|armv7-android|x86_64-android)$")
   set_target_properties(dmengine dmengine_release dmengine_headless PROPERTIES
     PREFIX "lib"
@@ -586,9 +640,17 @@ defold_install_targets(TARGETS engine engine_release engine_service engine_servi
   LIBRARY DESTINATION lib/${TARGET_PLATFORM}
   RUNTIME DESTINATION bin/${TARGET_PLATFORM})
 
-defold_install_targets(TARGETS dmengine dmengine_release dmengine_headless
-  LIBRARY DESTINATION bin/${TARGET_PLATFORM}
-  RUNTIME DESTINATION bin/${TARGET_PLATFORM})
+if(NOT DEFOLD_WASMCART)
+  defold_install_targets(TARGETS dmengine dmengine_release dmengine_headless
+    LIBRARY DESTINATION bin/${TARGET_PLATFORM}
+    RUNTIME DESTINATION bin/${TARGET_PLATFORM})
+endif()
+
+if(TARGET dmengine_wasmcart)
+  defold_install_targets(TARGETS dmengine_wasmcart
+    LIBRARY DESTINATION bin/${TARGET_PLATFORM}
+    RUNTIME DESTINATION bin/${TARGET_PLATFORM})
+endif()
 
 if(TARGET_PLATFORM MATCHES "win32|x86_64-xbone")
   foreach(_engine_pdb_target IN ITEMS dmengine dmengine_release dmengine_headless)
@@ -601,7 +663,7 @@ endif()
 if(TARGET_PLATFORM MATCHES "^(wasm-web|wasm_pthread-web)$")
   set(ENGINE_WEB_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}")
   install(CODE "
-    foreach(_name IN ITEMS dmengine dmengine_release dmengine_headless)
+    foreach(_name IN ITEMS dmengine dmengine_release dmengine_headless dmengine_wasmcart)
       foreach(_suffix IN ITEMS .js.mem .js.symbols .js.map .wasm .wasm.map .wasm.debug.wasm)
         set(_file \"${ENGINE_WEB_OUTPUT_DIR}/\${_name}\${_suffix}\")
         if(EXISTS \"\${_file}\")

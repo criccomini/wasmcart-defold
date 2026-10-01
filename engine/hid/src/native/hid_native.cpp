@@ -124,7 +124,11 @@ namespace dmHID
             context->m_Gamepads[i].m_Driver = DRIVER_HANDLE_FREE;
         }
 
-#if defined(__APPLE__)
+#if defined(DM_PLATFORM_WASMCART)
+        // A cart has no joystick enumeration and gets no device events; its
+        // pads live in shared memory the host refreshes each frame.
+        InstallGamepadDriver(context, CreateGamepadDriverWasmcart(context), "wasmcart");
+#elif defined(__APPLE__)
         InstallGamepadDriver(context, CreateGamepadDriverApple(context), "Apple");
 #else
         InstallGamepadDriver(context, CreateGamepadDriverGLFW(context), "GLFW");
@@ -237,6 +241,24 @@ namespace dmHID
     bool Update(HContext context)
     {
         dmPlatform::PollEvents(context->m_Window);
+
+#if defined(DM_PLATFORM_WASMCART)
+        // A cart receives no device-changed callback, so the one DetectDevices
+        // call at driver-install time is the ONLY one it would ever get - and
+        // at that moment the host has not written a pad block yet, so nothing
+        // is ever created and every pad reads as absent. Polling here is what
+        // makes hot-plug (and first-plug) work at all on this platform.
+        {
+            NativeContextUserData* user_data = (NativeContextUserData*) context->m_NativeContextUserData;
+            if (user_data)
+            {
+                for (uint32_t i = 0; i < user_data->m_GamepadDrivers.Size(); ++i)
+                {
+                    user_data->m_GamepadDrivers[i]->m_DetectDevices(context, user_data->m_GamepadDrivers[i]);
+                }
+            }
+        }
+#endif
 
         // Update keyboard
         if (!context->m_IgnoreKeyboard)

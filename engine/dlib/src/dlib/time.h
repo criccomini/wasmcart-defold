@@ -20,6 +20,17 @@
 
 namespace dmTime
 {
+#if defined(DM_PLATFORM_WASMCART)
+    /**
+     * Advance the cart's VIRTUAL clock. A wasmcart is stepped by its host, so
+     * the engine's timeline must be a function of how often wc_render() is
+     * called rather than of wall-clock time. Called once per host frame; see
+     * the comment in time_posix.cpp for why the wall clock is wrong here.
+     * @param microseconds time to add to the virtual clock
+     */
+    void AdvanceVirtualTime(uint64_t microseconds);
+#endif
+
     inline void BusyWait(uint32_t useconds) {
         uint64_t end = dmTime::GetMonotonicTime() + (uint64_t)useconds;
         while (dmTime::GetMonotonicTime() < end);

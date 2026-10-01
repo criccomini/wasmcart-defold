@@ -225,6 +225,12 @@ if(GRAPHICS_PLATFORM_SUPPORTS_OPENGL)
     target_compile_definitions(graphics PRIVATE GL_GLEXT_PROTOTYPES)
   endif()
   target_compile_definitions(graphics PUBLIC DM_GRAPHICS_USE_OPENGL)
+  if(DEFOLD_WASMCART)
+    # Cart build: GLES3 headers from Khronos, and the three emscripten
+    # HTML5/WebGL call sites compiled out. GL then resolves as plain wasm
+    # imports the host provides.
+    target_compile_definitions(graphics PUBLIC DM_PLATFORM_WASMCART)
+  endif()
   if(NOT TARGET_PLATFORM MATCHES "^(wasm-web|wasm_pthread-web|arm64-ios|arm64_sim-ios|arm64-macos|x86_64-macos)$")
     target_compile_definitions(graphics PUBLIC DM_HAVE_OPENGL_COMPUTE_SUPPORT)
   endif()

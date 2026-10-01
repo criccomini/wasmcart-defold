@@ -201,6 +201,10 @@ else()
 endif()
 
 # HTTP implementation: JS vs native
+# Carts keep the JS path too: the native script_http.cpp needs dlib's real
+# http_service, which web builds replace with http_service_null, so switching
+# trades 2 JS imports for 2 unresolved symbols. Neither works without a host
+# http surface; the JS one at least fails as a no-op rather than a null call.
 if (TARGET_PLATFORM MATCHES "^(js-web|wasm-web|wasm_pthread-web)$")
     list(FILTER GS_SOURCES EXCLUDE REGEX "/scripts/script_http\\.cpp$")
 else()

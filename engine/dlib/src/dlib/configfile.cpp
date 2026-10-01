@@ -604,7 +604,34 @@ namespace dmConfigFile
 
     static Result LoadFromFileInternal(const char* url, int argc, const char** argv, HConfig* config)
     {
-#ifdef __ANDROID__
+#if defined(DM_PLATFORM_WASMCART)
+        // A cart has no filesystem, so the fopen path below cannot work.
+        // dmSys::LoadResource is backed by the host's asset imports here,
+        // which is the same reason Android takes this route.
+        uint32_t buffer_size = 0;
+        if (dmSys::RESULT_OK != dmSys::ResourceSize(url, &buffer_size) || buffer_size == 0)
+        {
+            return RESULT_FILE_NOT_FOUND;
+        }
+
+        void* buffer = malloc(buffer_size);
+        if (!buffer)
+        {
+            return RESULT_FILE_NOT_FOUND;
+        }
+
+        uint32_t project_size = 0;
+        dmSys::Result sysr = dmSys::LoadResource(url, buffer, buffer_size, &project_size);
+        if (sysr != dmSys::RESULT_OK)
+        {
+            free(buffer);
+            return RESULT_FILE_NOT_FOUND;
+        }
+
+        Result r = LoadFromBufferInternal(url, (const char*) buffer, project_size, argc, argv, config);
+        free(buffer);
+        return r;
+#elif defined(__ANDROID__)
         // TODO:
         // This is not pretty but we wan't use dmSys::LoadResource()
         // on all platforms as we must be able

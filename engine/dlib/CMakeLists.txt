@@ -195,6 +195,21 @@ foreach(_feature_file IN LISTS DLIB_FEATURE_FILES)
   list(REMOVE_ITEM DLIB_SOURCES "${_feature_file}")
 endforeach()
 dlib_append_unique(DLIB_SOURCES ${DLIB_FEATURE_SOURCES})
+# Guarded on the web target too: DEFOLD_WASMCART is a build-wide option, but
+# build_engine also compiles dlib for the HOST platform to build bob and the
+# content pipeline. Those must keep their real filesystem.
+if(DEFOLD_WASMCART AND TARGET_PLATFORM_OS STREQUAL "web")
+  # A cart has no filesystem: its assets come from the host through
+  # wc_asset_size/wc_load_asset. sys_wasmcart.cpp defines the four resource
+  # entry points (ResourceExists/ResourceSize/LoadResource/LoadResourcePartial)
+  # plus ResolveMountFileName, so the posix versions must go or they collide.
+  # sys_posix stays: it still supplies Mkdir/Rmdir/Stat/IterateTree/etc, and
+  # guards only its resource-facing functions on DM_PLATFORM_WASMCART.
+  # sys_web goes: it defines the same resource functions against JS glue.
+  dlib_remove_matching(DLIB_SOURCES "/sys_web\\.cpp$")
+  list(APPEND DLIB_SOURCES "${DLIB_CORE_DIR}/sys_wasmcart.cpp")
+endif()
+
 dlib_remove_matching(DLIB_SOURCES "/image\\.cpp$" "/image_null\\.cpp$")
 dlib_remove_matching(DLIB_SOURCES "_null\\.cpp$")
 if(TARGET_PLATFORM MATCHES "web$")

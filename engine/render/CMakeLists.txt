@@ -67,9 +67,11 @@ file(GLOB RENDER_CORE_SOURCES CONFIGURE_DEPENDS "${RENDER_SRC_DIR}/render/*.cpp"
 file(GLOB RENDER_FONT_SOURCES CONFIGURE_DEPENDS "${RENDER_SRC_DIR}/render/font/*.cpp")
 set(RENDER_SOURCES ${RENDER_CORE_SOURCES} ${RENDER_FONT_SOURCES} ${RENDER_PROTO_CC})
 
-if(TARGET_PLATFORM MATCHES "web$")
+if(TARGET_PLATFORM MATCHES "web$" AND NOT DEFOLD_WASMCART)
   list(APPEND RENDER_SOURCES "${RENDER_SRC_DIR}/platform/renderer_web.cpp")
 else()
+  # A cart has no WebGL context to lose, and renderer_web.cpp's only job is
+  # registering that callback through JS glue.
   list(APPEND RENDER_SOURCES "${RENDER_SRC_DIR}/platform/renderer_common.cpp")
 endif()
 

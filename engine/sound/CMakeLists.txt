@@ -35,7 +35,11 @@ set(SOUND_OPENAL_SOURCES
   "${SOUND_SRC_DIR}/devices/device_openal.cpp")
 
 set(SOUND_SOURCES ${SOUND_BASE_SOURCES} "${SOUND_SRC_DIR}/sound.cpp")
-if(TARGET_PLATFORM MATCHES "android")
+if(DEFOLD_WASMCART AND TARGET_PLATFORM MATCHES "web$")
+  # device_js.cpp drives library_sound.js; a cart writes its own ring buffer
+  # and imports no JS.
+  list(APPEND SOUND_SOURCES "${SOUND_SRC_DIR}/devices/device_wasmcart.cpp")
+elseif(TARGET_PLATFORM MATCHES "android")
   list(APPEND SOUND_SOURCES "${SOUND_SRC_DIR}/devices/device_opensl.cpp")
 elseif(TARGET_PLATFORM MATCHES "web$")
   list(APPEND SOUND_SOURCES "${SOUND_SRC_DIR}/devices/device_js.cpp")

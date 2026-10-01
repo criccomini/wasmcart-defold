@@ -53,6 +53,12 @@ extern "C"
 
 #include "script_private.h"
 
+#if defined(DM_PLATFORM_WASMCART)
+// A cart has no filesystem: sys.save/sys.load/sys.exists route into the
+// wasmcart save block, which the host persists across sessions.
+#include <platform_window_wasmcart.h>
+#endif
+
 namespace dmScript
 {
 
@@ -219,7 +225,18 @@ union SaveLoadBuffer
         }
         uint32_t n_used = CheckTable(L, buffer, table_size, 2);
 
-#if !defined(__EMSCRIPTEN__)
+#if defined(DM_PLATFORM_WASMCART)
+        bool wrote = dmPlatform::WasmcartSaveWrite(filename, buffer, n_used);
+        Sys_FreeTableSerializationBuffer(buffer);
+        if (!wrote)
+        {
+            return luaL_error(L, "Could not write to the file %s. The cart save block is full or the data exceeds %d bytes.",
+                filename, WASMCART_SAVE_MAX_FILE);
+        }
+        lua_pushboolean(L, 1);
+        return 1;
+
+#elif !defined(__EMSCRIPTEN__)
         FILE* file = fopen(tmp_filename, "wb");
         if (!file)
         {
@@ -306,6 +323,26 @@ union SaveLoadBuffer
     static int Sys_Load(lua_State* L)
     {
         const char* filename = luaL_checkstring(L, 1);
+
+#if defined(DM_PLATFORM_WASMCART)
+        uint32_t stored_size = 0;
+        if (!dmPlatform::WasmcartSaveRead(filename, 0, 0, &stored_size))
+        {
+            // Absent reads as an empty table, matching the documented
+            // contract: sys.load never returns nil.
+            lua_newtable(L);
+            return 1;
+        }
+        char* cart_buffer = Sys_SetupTableSerializationBuffer(stored_size);
+        if (!cart_buffer)
+        {
+            return luaL_error(L, "Could not allocate %d bytes for table deserialization.", stored_size);
+        }
+        dmPlatform::WasmcartSaveRead(filename, cart_buffer, stored_size, 0);
+        PushTable(L, cart_buffer, stored_size);
+        Sys_FreeTableSerializationBuffer(cart_buffer);
+        return 1;
+#else
         FILE* file = fopen(filename, "rb");
         if (file == 0x0)
         {
@@ -333,6 +370,7 @@ union SaveLoadBuffer
         PushTable(L, buffer, nread);
         Sys_FreeTableSerializationBuffer(buffer);
         return 1;
+#endif
     }
 
     /*# check if a path exists
@@ -356,7 +394,11 @@ union SaveLoadBuffer
     static int Sys_Exists(lua_State* L)
     {
         const char* path = luaL_checkstring(L, 1);
+#if defined(DM_PLATFORM_WASMCART)
+        bool result = dmPlatform::WasmcartSaveExists(path);
+#else
         bool result = dmSys::Exists(path);
+#endif
         lua_pushboolean(L, result);
         return 1;
     }

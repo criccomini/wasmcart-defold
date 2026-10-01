@@ -26,7 +26,7 @@
 #include <dmsdk/dlib/vmath.h>
 #include <dmsdk/dlib/dstrings.h>
 
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) && !defined(DM_PLATFORM_WASMCART)
     #include <emscripten/emscripten.h>
     #include <emscripten/html5.h>
 #endif
@@ -200,6 +200,8 @@
         PFNGLDRAWELEMENTSINSTANCEDPROC glDrawElementsInstanced = NULL;
         PFNGLVERTEXATTRIBDIVISORPROC glVertexAttribDivisor = NULL;
     #endif
+#elif defined(DM_PLATFORM_WASMCART)
+    // GLES3 declarations already came in via graphics_opengl_defines.h.
 #elif defined(__EMSCRIPTEN__)
     #include <GL/glext.h>
     #if defined GL_ES_VERSION_2_0
@@ -1526,7 +1528,7 @@ static void LogFrameBufferError(GLenum status)
     #endif
 #endif
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(DM_PLATFORM_WASMCART)
         EMSCRIPTEN_WEBGL_CONTEXT_HANDLE emscripten_ctx = emscripten_webgl_get_current_context();
         assert(emscripten_ctx != 0 && "Unable to get GL context from emscripten.");
 
@@ -1769,7 +1771,19 @@ static void LogFrameBufferError(GLenum status)
 
         // GL_NUM_COMPRESSED_TEXTURE_FORMATS is deprecated in newer OpenGL Versions
         GLint iNumCompressedFormats = 0;
+#if defined(DM_PLATFORM_WASMCART)
+        // Skipped on a cart, as defence against older hosts.
+        // GL_COMPRESSED_TEXTURE_FORMATS is an ARRAY query, and a host that
+        // marshals glGetIntegerv through a scalar path hands the driver a
+        // one-element buffer for it -- 51 formats on this machine, so a ~200
+        // byte write past the end that corrupts the HOST's heap before the
+        // cart sees a value. Fixed in webgl-node (GET_INTEGERV_SCRATCH_INTS),
+        // but nothing here is load-bearing: every format below is also
+        // detected from the extension string, so not asking costs nothing.
+        (void) iNumCompressedFormats;
+#else
         glGetIntegerv(GL_NUM_COMPRESSED_TEXTURE_FORMATS, &iNumCompressedFormats);
+#endif
         if (iNumCompressedFormats > 0)
         {
             GLint *pCompressedFormats = new GLint[iNumCompressedFormats];
@@ -2160,7 +2174,15 @@ static void LogFrameBufferError(GLenum status)
 
     static void OpenGLRunApplicationLoop(void* user_data, WindowStepMethod step_method, WindowIsRunning is_running)
     {
-        #ifdef __EMSCRIPTEN__
+        #if defined(DM_PLATFORM_WASMCART)
+        // A cart does not own the frame loop: the host calls wc_render() once
+        // per frame and the cart returns. Stepping here would run the engine
+        // to completion inside a single host frame.
+        while (0 != is_running(user_data))
+        {
+            step_method(user_data);
+        }
+        #elif defined(__EMSCRIPTEN__)
         while (0 != is_running(user_data))
         {
             // N.B. Beyond the first test, the above statement is essentially formal since set_main_loop will throw an exception.
@@ -3703,7 +3725,7 @@ static void LogFrameBufferError(GLenum status)
 
             HUniformLocation uniform_location = INVALID_UNIFORM_LOCATION;
 
-            if (uniform_block_index != -1)
+            if (uniform_block_index != -1 && (uint32_t) uniform_block_index < program->m_UniformBuffers.Size())
             {
                 OpenGLScratchUniformBuffer& ubo = program->m_UniformBuffers[uniform_block_index];
                 uint32_t uniform_member_index = 0;
@@ -4298,7 +4320,16 @@ static void LogFrameBufferError(GLenum status)
         {
             uint32_t block_index = UNIFORM_LOCATION_GET_OP0(base_location);
             uint32_t member_index = UNIFORM_LOCATION_GET_OP1(base_location);
+            // A GL-reported block/member can outrun what the shader reflection
+            // data described. Indexing past either array asserts in a release
+            // build with no hint of which uniform did it, so skip the write
+            // instead: a missing constant renders wrong, an out-of-bounds write
+            // corrupts the heap.
+            if (block_index >= context->m_CurrentProgram->m_UniformBuffers.Size())
+                return;
             OpenGLScratchUniformBuffer& ubo = context->m_CurrentProgram->m_UniformBuffers[block_index];
+            if (member_index >= ubo.m_Offsets.Size() || ubo.m_BlockMemory == 0)
+                return;
 
             uint8_t* data_ptr = ubo.m_BlockMemory + ubo.m_Offsets[member_index];
             memcpy(data_ptr, data, sizeof(Vector4) * count);
@@ -4320,7 +4351,16 @@ static void LogFrameBufferError(GLenum status)
         {
             uint32_t block_index = UNIFORM_LOCATION_GET_OP0(base_location);
             uint32_t member_index = UNIFORM_LOCATION_GET_OP1(base_location);
+            // A GL-reported block/member can outrun what the shader reflection
+            // data described. Indexing past either array asserts in a release
+            // build with no hint of which uniform did it, so skip the write
+            // instead: a missing constant renders wrong, an out-of-bounds write
+            // corrupts the heap.
+            if (block_index >= context->m_CurrentProgram->m_UniformBuffers.Size())
+                return;
             OpenGLScratchUniformBuffer& ubo = context->m_CurrentProgram->m_UniformBuffers[block_index];
+            if (member_index >= ubo.m_Offsets.Size() || ubo.m_BlockMemory == 0)
+                return;
 
             uint8_t* data_ptr = ubo.m_BlockMemory + ubo.m_Offsets[member_index];
             memcpy(data_ptr, data, sizeof(Vector4) * count * 4);

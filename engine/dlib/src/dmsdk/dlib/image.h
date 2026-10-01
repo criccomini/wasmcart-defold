@@ -62,6 +62,11 @@ namespace dmImage
         TYPE_RGBA            = 1,
         TYPE_LUMINANCE       = 2,
         TYPE_LUMINANCE_ALPHA = 3,
+        // Internal float image type used by the texture build pipeline.
+        // Declared here so the value is within the enum's representable
+        // range; C-style casting an out-of-range value is UB and is
+        // rejected by clang 21+ in constant expressions.
+        TYPE_RGBA32F         = 4,
     };
 
     enum CompressionType

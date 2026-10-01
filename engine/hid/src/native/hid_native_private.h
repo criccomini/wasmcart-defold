@@ -46,6 +46,7 @@ namespace dmHID
     void           SetGamepadConnectionStatus(HContext context, Gamepad* gamepad, bool connection_status);
 
     GamepadDriver* CreateGamepadDriverGLFW(HContext context);
+    GamepadDriver* CreateGamepadDriverWasmcart(HContext context);
     GamepadDriver* CreateGamepadDriverApple(HContext context);
 }
 

@@ -68,7 +68,8 @@ _CMAKE_FEATURE_FLAG_MAP = {
     '--with-dx12': 'WITH_DX12',
     '--with-metal': 'WITH_METAL',
     '--with-opus': 'WITH_OPUS',
-    '--with-webgpu': 'WITH_WEBGPU'
+    '--with-webgpu': 'WITH_WEBGPU',
+    '--with-wasmcart': 'DEFOLD_WASMCART'
 }
 
 _CMAKE_FEATURE_LIST_OPTIONS = {

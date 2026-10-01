@@ -23,6 +23,14 @@ configure_file("${PLAT_SRC_DIR}/window.hpp" "${PLATFORM_GENERATED_INCLUDE_DIR}/p
 
 # Select platform sources (centralized)
 set(PLATFORM_USE_GLFW3 OFF)
+if(DEFOLD_WASMCART)
+    # A cart build replaces the window backend outright rather than adding a
+    # parallel target: `graphics`, `render` and `font_render` all link
+    # `platform` publicly, so two coexisting backends collide at link time.
+    set(DEFOLD_PLATFORM_WINDOW_SOURCES
+        "${PLAT_SRC_DIR}/platform_window_wasmcart.cpp"
+        "${PLAT_SRC_DIR}/platform_wasmcart_save.cpp")
+endif()
 if(DEFOLD_PLATFORM_WINDOW_SOURCES)
     set(_platform_private_extra_sources)
     if(DEFOLD_PLATFORM_WINDOW_JOYSTICK_GUID_STUB)

@@ -19,6 +19,11 @@
 
 #if defined(DM_GRAPHICS_USE_OPENGLES)
 #define GL_GLEXT_PROTOTYPES
+// GLES2/gl2.h FIRST: Defold defines GL_ES_VERSION_2_0 as a build flag, which
+// suppresses the GLES2 section of gl3.h -- including the GLtype typedefs it
+// would otherwise provide. Pulling gl2.h in first supplies the types, then
+// gl3.h adds the GLES3 entry points on top.
+#include <GLES2/gl2.h>
 #include <GLES3/gl3.h>
 #include <GLES2/gl2ext.h>
 #define GL_BGRA GL_BGRA_EXT
@@ -55,6 +60,29 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #define GL_BGRA GL_BGRA_EXT
+#elif defined (DM_PLATFORM_WASMCART)
+// A cart links GL as plain wasm imports rather than going through
+// emscripten's HTML5/WebGL glue, so it needs the real GLES3 declarations.
+// <GL/gl.h> is the desktop-GL shim and is missing the FBO, separate-blend
+// and VAO entry points the GLES3 backend calls.
+//
+// The Khronos headers gate their own typedefs behind
+// "#ifndef GL_ES_VERSION_2_0", and Defold passes -DGL_ES_VERSION_2_0 as a
+// build flag. Left alone that suppresses GLenum/GLuint/GLsizei while the
+// GLES3 prototypes still reference them, so undefine it across the includes
+// and let gl2.h define it itself. The rest of the engine tests the macro to
+// pick its GLES code paths, and gl2.h leaves it defined.
+#define GL_GLEXT_PROTOTYPES
+#undef GL_ES_VERSION_2_0
+#include <GLES2/gl2.h>
+#include <GLES3/gl3.h>
+#include <GLES2/gl2ext.h>
+#ifndef GL_ES_VERSION_2_0
+#define GL_ES_VERSION_2_0 1
+#endif
+#ifndef GL_BGRA
+#define GL_BGRA GL_BGRA_EXT
+#endif
 #elif defined (__EMSCRIPTEN__)
 #include <GL/gl.h>
 #include <GL/glext.h>

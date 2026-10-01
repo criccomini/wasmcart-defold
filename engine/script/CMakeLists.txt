@@ -109,6 +109,12 @@ target_include_directories(script PUBLIC
 target_compile_definitions(script PRIVATE
   "DLIB_LOG_DOMAIN=\"SCRIPT\""
   "LUASOCKET_API=")
+if(DEFOLD_WASMCART)
+  # sys.save/sys.load have no filesystem to use on a cart and route into the
+  # wasmcart save block instead.
+  target_compile_definitions(script PRIVATE DM_PLATFORM_WASMCART)
+  target_include_directories(script PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../platform/src")
+endif()
 if(TARGET graphics_proto)
   add_dependencies(script graphics_proto_header)
 endif()
