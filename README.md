@@ -45,11 +45,22 @@ Requires a Linux host with the Defold build prerequisites (see
 `README_BUILD.md`, upstream's own instructions).
 
 ```bash
-./scripts/build.py shell          # sets DEFOLD_HOME, DYNAMO_HOME, JAVA_HOME, PATH
+git remote add origin <this repo>   # see below: the build shells out to git
+./scripts/build.py shell            # sets DEFOLD_HOME, DYNAMO_HOME, JAVA_HOME, PATH
 ./scripts/build.py --platform=wasm-web --skip-tests build_engine -- \
     --skip-build-tests --with-wasmcart
 # -> tmp/dynamo_home/bin/wasm-web/dmengine_wasmcart.wasm
 ```
+
+Two prerequisites that are easy to miss because upstream does not track either,
+both found by building this repo from scratch:
+
+- **The tree must be a git repo with an `origin` remote.** `build.py` runs
+  `git remote get-url origin` and aborts with `No such remote 'origin'` if there
+  is none. A plain archive extract will not build.
+- **`dmenv.sh` is generated, not committed.** `./scripts/build.py shell` sets the
+  same variables; `dmenv.sh` is only a convenience for re-entering that
+  environment in a new terminal.
 
 **`scripts/build.py` can print `Done` and exit 0 after a fatal compile error**,
 leaving the previous `.wasm` in place so the next cart you build silently tests
