@@ -1,0 +1,6 @@
+name: "valid"
+mesh: "/render_target/meshset_valid_gltf.gltf"
+textures: "/render_target/valid.render_target"
+animations: "/render_target/meshset_valid_gltf.gltf"
+material: "/render_target/material_valid.material"
+default_animation: ""

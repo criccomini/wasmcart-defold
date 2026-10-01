@@ -1,0 +1,10 @@
+name: "unnamed"
+instances {
+  id: "checkpoint_activator"
+  prototype: "/editor1/test.go"
+}
+instances {
+  id: "interactionpoint"
+  prototype: "/editor1/test.go"
+}
+scale_along_z: 0

@@ -1,0 +1,3 @@
+tile_set: "/sprite/tile_valid.tileset"
+default_animation: "missing"
+material: "/sprite/sprite.material"

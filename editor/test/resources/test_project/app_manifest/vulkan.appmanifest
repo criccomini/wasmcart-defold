@@ -1,0 +1,124 @@
+# App manifest generated Fri Sep 02 2022 16:19:20 GMT+0200 (Central European Summer Time)
+# Settings: Vulkan
+platforms:
+    arm64-osx:
+        context:
+            excludeLibs: ["graphics", "graphics_metal"]
+            excludeSymbols: ["GraphicsAdapterOpenGL", "GraphicsAdapterMetal"]
+            symbols: ["GraphicsAdapterVulkan"]
+            libs: ["graphics_vulkan", "platform_vulkan", "MoltenVK"]
+            frameworks: ["Metal","IOSurface","QuartzCore"]
+            linkFlags: []
+
+    x86_64-osx:
+        context:
+            excludeLibs: ["graphics", "graphics_metal"]
+            excludeSymbols: ["GraphicsAdapterOpenGL", "GraphicsAdapterMetal"]
+            symbols: ["GraphicsAdapterVulkan"]
+            libs: ["graphics_vulkan", "platform_vulkan", "MoltenVK"]
+            frameworks: ["Metal","IOSurface","QuartzCore"]
+            linkFlags: []
+
+    x86_64-linux:
+        context:
+            excludeLibs: ["graphics"]
+            excludeSymbols: ["GraphicsAdapterOpenGL"]
+            symbols: ["GraphicsAdapterVulkan"]
+            libs: ["platform_vulkan", "graphics_vulkan","X11-xcb"]
+            dynamicLibs: ["vulkan"]
+            linkFlags: []
+
+    arm64-linux:
+        context:
+            excludeLibs: ["graphics", "graphics_opengles"]
+            excludeSymbols: ["GraphicsAdapterOpenGL", "GraphicsAdapterOpenGLES"]
+            symbols: ["GraphicsAdapterVulkan"]
+            libs: ["platform_vulkan", "graphics_vulkan","X11-xcb"]
+            dynamicLibs: ["vulkan"]
+            linkFlags: []
+
+    wasm-web:
+        context:
+            excludeLibs: []
+            excludeJsLibs: []
+            excludeSymbols: []
+            symbols: []
+            libs: []
+            linkFlags: []
+
+    wasm_pthread-web:
+        context:
+            excludeLibs: []
+            excludeJsLibs: []
+            excludeSymbols: []
+            symbols: []
+            libs: []
+            linkFlags: []
+
+    x86_64-win32:
+        context:
+            excludeLibs: ["graphics", "platform"]
+            excludeSymbols: ["GraphicsAdapterOpenGL"]
+            symbols: ["GraphicsAdapterVulkan"]
+            libs: ["graphics_vulkan.lib", "platform_vulkan.lib", "vulkan-1.lib"]
+            linkFlags: []
+
+    armv7-android:
+        context:
+            excludeLibs: ["graphics_opengles", "dmglfw"]
+            excludeJars: []
+            excludeDynamicLibs: ["vulkan", "EGL", "GLESv1_CM", "GLESv2"]
+            excludeSymbols: ["GraphicsAdapterOpenGLES"]
+            symbols: ["GraphicsAdapterVulkan"]
+            libs: ["graphics_vulkan", "dmglfw_vulkan"]
+            linkFlags: []
+            jetifier: true
+
+    arm64-android:
+        context:
+            excludeLibs: ["graphics_opengles", "dmglfw"]
+            excludeJars: []
+            excludeDynamicLibs: ["vulkan", "EGL", "GLESv1_CM", "GLESv2"]
+            excludeSymbols: ["GraphicsAdapterOpenGLES"]
+            symbols: ["GraphicsAdapterVulkan"]
+            libs: ["graphics_vulkan", "dmglfw_vulkan"]
+            linkFlags: []
+            jetifier: true
+
+    x86_64-android:
+        context:
+            excludeLibs: ["graphics_opengles", "dmglfw"]
+            excludeJars: []
+            excludeDynamicLibs: ["vulkan", "EGL", "GLESv1_CM", "GLESv2"]
+            excludeSymbols: ["GraphicsAdapterOpenGLES"]
+            symbols: ["GraphicsAdapterVulkan"]
+            libs: ["graphics_vulkan", "dmglfw_vulkan"]
+            linkFlags: []
+            jetifier: true
+
+    armv7-ios:
+        context:
+            excludeLibs: []
+            excludeSymbols: []
+            symbols: []
+            libs: []
+            frameworks: []
+            linkFlags: []
+
+    arm64-ios:
+        context:
+            excludeLibs: ["graphics", "graphics_metal"]
+            excludeSymbols: ["GraphicsAdapterOpenGL", "GraphicsAdapterMetal"]
+            symbols: ["GraphicsAdapterVulkan"]
+            libs: ["graphics_vulkan","MoltenVK"]
+            frameworks: ["Metal","IOSurface","QuartzCore"]
+            linkFlags: []
+
+    arm64_sim-ios:
+        context:
+            excludeLibs: ["graphics_metal"]
+            excludeSymbols: ["GraphicsAdapterMetal"]
+            symbols: []
+            libs: []
+            frameworks: []
+            linkFlags: []

@@ -1,0 +1,215 @@
+-- Copyright 2020-2026 The Defold Foundation
+-- Copyright 2014-2020 King
+-- Copyright 2009-2014 Ragnar Svensson, Christian Murray
+-- Licensed under the Defold License version 1.0 (the "License"); you may not use
+-- this file except in compliance with the License.
+--
+-- You may obtain a copy of the License, together with FAQs at
+-- https://www.defold.com/license
+--
+-- Unless required by applicable law or agreed to in writing, software distributed
+-- under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+-- CONDITIONS OF ANY KIND, either express or implied. See the License for the
+-- specific language governing permissions and limitations under the License.
+
+require "resource.lua_test_resource_helpers"
+
+-- helper function for general tests in init() function
+-- does a pcall and verify that it fails
+local function assert_error(func)
+    local r, err = pcall(func)
+    if not r then
+        print(err)
+    end
+    assert(not r)
+end
+
+local function test_create_get_atlas(self, test_anim)
+    local test_geo = make_quad(128, 128, 0, 0)
+
+    local atlas_id = resource.create_atlas("/test_create.texturesetc", {
+        texture = self.valid_texture_path,
+        animations = {test_anim},
+        geometries = {test_geo}
+    })
+
+    local data = resource.get_atlas(atlas_id)
+
+    assert(data.texture == hash(self.valid_texture_path))
+    assert(#data.animations == 1)
+    assert(#data.geometries == 1)
+
+    assert_anim(data.animations[1], test_anim)
+    assert_geo(data.geometries[1], test_geo)
+
+    resource.release(atlas_id)
+end
+
+local function test_create_release_atlas(self)
+    local atlas_id = resource.create_atlas("/test_release.texturesetc", {
+        texture = self.valid_texture_path,
+        animations = {make_anim("test_anim", 128, 128, { 1 })},
+        geometries = {make_quad(128, 128, 0, 0)}
+    })
+
+    resource.release(atlas_id)
+
+    -- resource should not be available now!
+    assert_error(function() resource.get_atlas(atlas_id) end)
+end
+
+local function test_get_set_atlas(self)
+    local data = resource.get_atlas(self.valid_tileset_path)
+
+    assert(data.texture == self.valid_texture_path)
+    assert(data.geometries)
+    assert(data.animations)
+
+    assert(#data.geometries > 0)
+    assert(#data.animations > 0)
+
+    -- these values are specified in the '/resource/tile_valid.t.texturesetc' file
+    assert_anim(data.animations[1], {
+        id              = "anim",
+        width           = 16,
+        height          = 16,
+        frames          = { 1 },
+        fps             = 30,
+        playback        = go.PLAYBACK_ONCE_FORWARD,
+        flip_vertical   = false,
+        flip_horizontal = false,
+    })
+
+    resource.set_atlas(self.valid_tileset_path, data)
+end
+
+local function test_get_atlas_frames_non_contiguous(self)
+    local data = resource.get_atlas("/resource/issue_11956.a.texturesetc")
+
+    assert(#data.geometries == 10)
+    assert(#data.animations == 1)
+
+    assert_anim(data.animations[1], {
+        id              = "issue_11956",
+        width           = 64,
+        height          = 64,
+        frames          = {10, 1, 4, 8, 9, 2, 3, 5, 6, 7},
+        fps             = 30,
+        playback        = go.PLAYBACK_ONCE_FORWARD,
+        flip_vertical   = false,
+        flip_horizontal = false,
+    })
+end
+
+local function test_set_atlas_valid(self)
+    local animations = {
+        {
+            id              = "anim_1",
+            width           = 4,
+            height          = 4,
+            frames          = { 1 },
+            fps             = 15,
+            playback        = go.PLAYBACK_LOOP_PINGPONG,
+            flip_vertical   = false,
+            flip_horizontal = true
+        },
+        {
+            id              = "anim_2",
+            width           = 16,
+            height          = 16,
+            frames          = { 2 },
+            fps             = 2,
+            playback        = go.PLAYBACK_NONE,
+            flip_vertical   = true,
+            flip_horizontal = false
+        },
+    }
+    local geometries = {
+        make_quad(16, 16, 0, 0),
+        make_quad(16, 16, 16, 0)
+    }
+    resource.set_atlas(self.valid_tileset_path, {
+        texture = self.valid_texture_path,
+        geometries = geometries,
+        animations = animations
+    })
+
+    local data = resource.get_atlas(self.valid_tileset_path)
+    for k,v in pairs(data.animations) do
+        assert_anim(v, animations[k])
+    end
+    for k,v in pairs(data.geometries) do
+        assert_geo(v, geometries[k])
+    end
+end
+
+local function test_get_atlas_invalid(self)
+    -- test get wrong path
+    assert_error(function() resource.get_atlas("/missing-path") end)
+end
+
+local function test_atlas_invalid(self, fn, valid_path)
+    -- test set wrong path
+    assert_error(function() fn("/missing-path", {}) end)
+
+    -- test set wrong texture path
+    assert_error(function() fn(valid_path, {
+        texture = "wrong-path", animations = {}, geometries = {}}) end)
+
+    -- test having no animations or geometry table
+    assert_error(function() fn(valid_path, {
+        texture = self.valid_texture_path}) end)
+
+    -- test set missing fields in animation
+    assert_error(function() fn(valid_path, {
+        texture = self.valid_texture_path, animations = {{}}, geometries = {}}) end)
+
+    -- test set missing fields in geometry
+    assert_error(function() fn(valid_path, {
+        texture = self.valid_texture_path, animations = {}, geometries = {{}}}) end)
+
+    -- test specifying animations but no geometry
+    assert_error(function() fn(valid_path, {
+        texture = self.valid_texture_path, animations = {make_anim("test", 1, 1, { 1 })}, geometries = {}}) end)
+
+    -- test specifying incorrect animation start/end
+    assert_error(function() fn(valid_path, {
+        texture = self.valid_texture_path, animations = {make_anim_from_startend("test", 1, 1, 0, 0)}, geometries = {make_quad(1,1,1,1)}}) end)
+
+    -- test specifying incorrect animation frames
+    assert_error(function() fn(valid_path, {
+        texture = self.valid_texture_path, animations = {make_anim("test", 1, 1, { 0 })}, geometries = {make_quad(1,1,1,1)}}) end)
+
+    -- test uneven components in data array
+    assert_error(function() fn(valid_path, {
+        texture = self.valid_texture_path, animations = {}, geometries = { {vertices = {1}, uvs = {}, indices = {}} }}) end)
+end
+
+local function test_create_atlas_invalid(self)
+    -- test creating atlas at a resource path that already exists
+    assert_error(function() resource.create_atlas(self.valid_tileset_path) end)
+end
+
+function init(self)
+    self.valid_tileset_path = "/resource/tile_valid.t.texturesetc"
+    self.valid_texture_path = "/resource/__tile_valid_tilesource.texturec"
+
+    -- valid tests
+    test_create_get_atlas(self, make_anim("test_anim", 128, 128, { 1 }))
+    test_create_get_atlas(self, make_anim_from_startend("test_anim", 128, 128, 1, 2))
+    test_create_release_atlas(self)
+    test_get_set_atlas(self)
+    test_get_atlas_frames_non_contiguous(self)
+    test_set_atlas_valid(self)
+
+    -- invalid tests
+    test_get_atlas_invalid(self)
+
+    -- resource.set_atlas and resource.create_atlas should support the same arguments
+    -- so we can reuse the test functions here
+    test_atlas_invalid(self, resource.set_atlas, self.valid_tileset_path)
+    test_atlas_invalid(self, resource.create_atlas, self.valid_tileset_path)
+
+    -- do a specific invalid test for create_atlas
+    test_create_atlas_invalid(self)
+end

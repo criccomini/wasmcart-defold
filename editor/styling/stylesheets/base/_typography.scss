@@ -1,0 +1,94 @@
+@font-face {
+   src: url("OpenSans-Regular.ttf");
+}
+
+@font-face {
+  font-family: 'Source Sans Pro';
+  src: url("SourceSansPro-Regular.ttf");
+}
+
+@font-face {
+  src: url("SourceSansPro-Semibold.ttf");
+}
+
+@font-face {
+  src: url("SourceSansPro-SemiBoldItalic.ttf");
+}
+
+@font-face {
+  src: url("SourceSansPro-Italic.ttf");
+}
+
+@font-face {
+  src: url("SourceSansPro-Light.ttf");
+}
+
+@font-face {
+  src: url("DejaVuSansMono.ttf");
+}
+
+$default-font-mono: 'Dejavu Sans Mono';
+$default-font: 'Source Sans Pro';
+$default-font-bold: 'Source Sans Pro Semibold';
+$default-font-italic: 'Source Sans Pro Italic';
+$default-font-light: 'Source Sans Pro Light';
+
+.root {
+    -fx-font-size: 13px;
+    -fx-font-family: $default-font;
+}
+
+Text.strong {
+  -fx-font-family: $default-font-bold;
+}
+
+Text.emphasis {
+  -fx-font-family: $default-font-italic;
+}
+
+Label.strong {
+  -fx-font-family: $default-font-bold;
+}
+
+Label.emphasis {
+  -fx-font-family: $default-font-italic;
+}
+
+#build-errors-container {
+    .tree-cell {
+        -fx-font-family: $default-font-mono;
+        -fx-font-size: 90%;
+    }
+}
+
+// Section titles in game.project
+.cljfx-form-title {
+    -fx-font-family: $default-font-light;
+    -fx-font-size: 200%;
+    -fx-font-smoothing-type: lcd;
+}
+
+// Header on home pane of welcome screen
+#welcome-dialog {
+    .df-header {
+        -fx-font-family: $default-font-light;
+        -fx-font-size: 150%;
+        -fx-font-smoothing-type: lcd;
+    }
+    .df-sub-header {
+        -fx-font-family: $default-font;
+        -fx-font-size: 125%;
+        -fx-font-smoothing-type: lcd;
+    }
+}
+
+#welcome-dialog #left-pane .pane-button {
+    -fx-font-family: $default-font-bold;
+    -fx-font-size: 110%;
+}
+
+#welcome-dialog #progress-overlay #progress-header {
+    -fx-font-family: $default-font-light;
+    -fx-font-size: 150%;
+    -fx-font-smoothing-type: lcd;
+}

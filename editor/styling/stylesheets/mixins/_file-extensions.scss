@@ -1,0 +1,51 @@
+@mixin extension-template($element, $color, $active-color){
+    // tab, tree, menu
+    @if $element == "menu" {
+        & > .graphic-container > .image-view {
+            @include colorize-image-view($color);
+        }
+        &:focused > .graphic-container > .image-view {
+            @include colorize-image-view($active-color);
+        }
+    } @else if $element == "tab" {
+        & > .tab-container > .tab-label > .image-view {
+            @include colorize-image-view($color);
+        }
+        &:selected, &:hover {
+            & > .tab-container > .tab-label > .image-view {
+                @include colorize-image-view($active-color);
+            }
+        }
+    } @else {
+        & > .image-view {
+            @include colorize-image-view($color);
+        }
+        &:selected, &:hover {
+            & > .image-view {
+                @include colorize-image-view($active-color);
+            }
+        }
+    }
+}
+
+@mixin extensions ($element) {
+    &.resource {
+        @include extension-template($element, -df-unknown-file, -df-unknown-file-active)
+    }
+
+    &.resource-folder {
+        @include extension-template($element, -df-folder, -df-folder-active)
+    }
+
+    &.resource-kind {
+        &-script {
+            @include extension-template($element, -df-script-file, -df-script-file-active);
+        }
+        &-design {
+            @include extension-template($element, -df-design-file, -df-design-file-active);
+        }
+        &-property {
+            @include extension-template($element, -df-property-file, -df-property-file-active);
+        }
+    }
+}

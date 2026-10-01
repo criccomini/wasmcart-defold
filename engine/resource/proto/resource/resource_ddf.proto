@@ -1,0 +1,10 @@
+syntax = "proto2";
+package dmResourceDDF;
+
+option java_package = "com.dynamo.resource.proto";
+option java_outer_classname = "Resource";
+
+message Reload
+{
+    repeated string resources = 1;
+}

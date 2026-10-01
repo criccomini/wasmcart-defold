@@ -1,0 +1,39 @@
+@use "sass:string";
+
+.radio-button {
+    &:hover {
+        -fx-text-fill: -df-text-selected;
+    }
+    &:focused:selected {
+        -fx-text-fill: -df-text-selected;
+    }
+    &:selected {
+        .radio {
+            -fx-border-color: transparent transparent -df-defold-orange transparent;
+        }
+        .dot {
+            -fx-background-color: -df-text;
+        }
+        &:hover {
+            .radio {
+                -fx-border-color: transparent transparent -df-defold-orange transparent;
+            }
+            .dot {
+                -fx-background-color: -df-text-selected;
+            }
+        }
+    }
+
+    .radio {
+        -fx-background-radius: 50%;
+        -fx-border-radius: 50%;
+        -fx-background-image: string.unquote("null");
+        -fx-background-color: -df-background;
+        -fx-border-width: 1;
+        -fx-border-color: -df-background-lighter;
+    }
+
+    .dot {
+        -fx-shape: "M 100 100 a 50 50 0 1 0 0.00001 0";
+    }
+}

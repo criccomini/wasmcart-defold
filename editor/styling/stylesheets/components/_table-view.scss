@@ -1,0 +1,43 @@
+
+.table-view {
+    -fx-background-insets: 0;
+    -fx-border-width: 0;
+    -fx-border-color: transparent;
+    .table-column {
+        -fx-background-insets: 0;
+        -fx-border-width: 0 1 0 0;
+        -fx-border-color: -df-background-lighter;
+    }
+    .filler {
+        -fx-background-insets: 0;
+    }
+    .column-header-background {
+        -fx-border-width: 0 0 1 0;
+        -fx-border-color: -df-background-lighter;
+    }
+    .table-row-cell {
+        -fx-border-width: 0;
+        -fx-border-color: transparent;
+        &:selected {
+            -fx-background-color: -df-background-lighter;
+            .table-cell {
+                -fx-text-fill: -df-text-selected;
+            }
+        }
+        &:focused {
+            -fx-border-color: transparent;
+            -fx-border-width: 0;
+            -fx-background-insets: 0;
+        }
+        .text-field {
+            -fx-background-insets: 0;
+            &:focused {
+                -fx-background-insets: 0;
+            }
+        }
+    }
+    &:focused {
+        -fx-border-color: -df-defold-orange;
+        -fx-border-width: 0 0 1 0;
+    }
+}

@@ -1,0 +1,23 @@
+local M = {}
+
+local function test_open_resource(label, ...)
+    local success = pcall(editor.ui.open_resource, ...)
+    print("Open " .. label .. ": " .. (success and "ok" or "error"))
+end
+
+function M.get_commands()
+    return {{
+        label = "Test",
+        locations = {"Edit"},
+        run = function()
+            test_open_resource("'/game.project'", "/game.project")
+            test_open_resource("'/does_not_exist.txt'", "/does_not_exist.txt")
+            test_open_resource("'not_a_resource_path.go'", "not_a_resource_path.go")
+            test_open_resource("form view", "/game.project", "form")
+            test_open_resource("code position", "/test.editor_script", "code", {line = 3, column = 2})
+            test_open_resource("args without view", "/test.editor_script", {line = 3})
+        end
+    }}
+end
+
+return M

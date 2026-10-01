@@ -1,0 +1,3297 @@
+// Copyright 2020-2026 The Defold Foundation
+// Copyright 2014-2020 King
+// Copyright 2009-2014 Ragnar Svensson, Christian Murray
+// Licensed under the Defold License version 1.0 (the "License"); you may not use
+// this file except in compliance with the License.
+//
+// You may obtain a copy of the License, together with FAQs at
+// https://www.defold.com/license
+//
+// Unless required by applicable law or agreed to in writing, software distributed
+// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+// CONDITIONS OF ANY KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations under the License.
+
+#define JC_TEST_IMPLEMENTATION
+#include <jc_test/jc_test.h>
+
+#include "test_physics.h"
+#include <dlib/math.h>
+
+#if defined(PHYSICS_TEST_BULLET_3D)
+#include <BulletCollision/CollisionShapes/btBvhTriangleMeshShape.h>
+#include <BulletCollision/CollisionShapes/btTriangleIndexVertexArray.h>
+#include <BulletCollision/Gimpact/btGImpactShape.h>
+#endif
+
+using namespace dmVMath;
+
+VisualObject::VisualObject()
+: m_Position(0.0f, 0.0f, 0.0f)
+, m_Rotation(0.0f, 0.0f, 0.0f, 1.0f)
+, m_Scale(1.0f)
+, m_CollisionCount(0)
+, m_FirstCollisionGroup(0)
+{
+
+}
+
+void GetWorldTransform(void* visual_object, dmTransform::Transform& world_transform)
+{
+    if (visual_object != 0x0)
+    {
+        VisualObject* o = (VisualObject*) visual_object;
+        world_transform.SetTranslation(Vector3(o->m_Position));
+        world_transform.SetRotation(o->m_Rotation);
+        world_transform.SetUniformScale(o->m_Scale);
+    }
+    else
+    {
+        world_transform.SetIdentity();
+    }
+}
+
+void SetWorldTransform(void* visual_object, const Point3& position, const Quat& rotation)
+{
+    if (!visual_object) return;
+    VisualObject* o = (VisualObject*) visual_object;
+    o->m_Position = position;
+    o->m_Rotation = rotation;
+}
+
+bool CollisionCallback(void* user_data_a, uint16_t group_a, void* user_data_b, uint16_t group_b, void* user_data)
+{
+    VisualObject* vo = (VisualObject*)user_data_a;
+    if (vo->m_CollisionCount == 0)
+        vo->m_FirstCollisionGroup = group_a;
+    ++vo->m_CollisionCount;
+    vo = (VisualObject*)user_data_b;
+    if (vo->m_CollisionCount == 0)
+        vo->m_FirstCollisionGroup = group_b;
+    ++vo->m_CollisionCount;
+    int* count = (int*)user_data;
+    if (*count < 20)
+    {
+        *count += 1;
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool ContactPointCallback(const dmPhysics::ContactPoint& contact_point, void* user_data)
+{
+    int* count = (int*)user_data;
+    if (*count < 20)
+    {
+        *count += 1;
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+#if defined(PHYSICS_TEST_BULLET_3D)
+
+#include "../physics_3d.h"
+
+Test3D::Test3D()
+: m_NewContextFunc(dmPhysics::NewContext3D)
+, m_DeleteContextFunc(dmPhysics::DeleteContext3D)
+, m_NewWorldFunc(dmPhysics::NewWorld3D)
+, m_DeleteWorldFunc(dmPhysics::DeleteWorld3D)
+, m_StepWorldFunc(dmPhysics::StepWorld3D)
+, m_SetDrawDebugFunc(dmPhysics::SetDrawDebug3D)
+, m_NewBoxShapeFunc(dmPhysics::NewBoxShape3D)
+, m_NewSphereShapeFunc(dmPhysics::NewSphereShape3D)
+, m_NewCapsuleShapeFunc(dmPhysics::NewCapsuleShape3D)
+, m_NewConvexHullShapeFunc(dmPhysics::NewConvexHullShape3D)
+, m_DeleteCollisionShapeFunc(dmPhysics::DeleteCollisionShape3D)
+, m_NewCollisionObjectFunc(dmPhysics::NewCollisionObject3D)
+, m_NewCollisionObjectFunc2(dmPhysics::NewCollisionObject3D)
+, m_DeleteCollisionObjectFunc(dmPhysics::DeleteCollisionObject3D)
+, m_GetCollisionShapesFunc(dmPhysics::GetCollisionShapes3D)
+, m_SetCollisionObjectUserDataFunc(dmPhysics::SetCollisionObjectUserData3D)
+, m_GetCollisionObjectUserDataFunc(dmPhysics::GetCollisionObjectUserData3D)
+, m_ApplyForceFunc(dmPhysics::ApplyForce3D)
+, m_GetTotalForceFunc(dmPhysics::GetTotalForce3D)
+, m_GetWorldPositionFunc(dmPhysics::GetWorldPosition3D)
+, m_GetWorldRotationFunc(dmPhysics::GetWorldRotation3D)
+, m_GetLinearVelocityFunc(dmPhysics::GetLinearVelocity3D)
+, m_GetAngularVelocityFunc(dmPhysics::GetAngularVelocity3D)
+, m_SetLinearVelocityFunc(dmPhysics::SetLinearVelocity3D)
+, m_SetAngularVelocityFunc(dmPhysics::SetAngularVelocity3D)
+, m_IsEnabledFunc(dmPhysics::IsEnabled3D)
+, m_SetEnabledFunc(dmPhysics::SetEnabled3D)
+, m_IsSleepingFunc(dmPhysics::IsSleeping3D)
+, m_WakeupFunc(dmPhysics::Wakeup3D)
+, m_SetLockedRotationFunc(dmPhysics::SetLockedRotation3D)
+, m_GetLinearDampingFunc(dmPhysics::GetLinearDamping3D)
+, m_SetLinearDampingFunc(dmPhysics::SetLinearDamping3D)
+, m_GetAngularDampingFunc(dmPhysics::GetAngularDamping3D)
+, m_SetAngularDampingFunc(dmPhysics::SetAngularDamping3D)
+, m_GetMassFunc(dmPhysics::GetMass3D)
+, m_RequestRayCastFunc(dmPhysics::RequestRayCast3D)
+, m_RayCastFunc(dmPhysics::RayCast3D)
+, m_SetDebugCallbacksFunc(dmPhysics::SetDebugCallbacks3D)
+, m_ReplaceShapeFunc(dmPhysics::ReplaceShape3D)
+, m_SetGravityFunc(dmPhysics::SetGravity3D)
+, m_GetGravityFunc(dmPhysics::GetGravity3D)
+, m_Vertices(new float[4*3])
+, m_VertexCount(4)
+, m_PolygonRadius(0.001f)
+, m_Is3D(false)
+{
+    m_Vertices[0] = 0.0f; m_Vertices[1] = 0.0f; m_Vertices[2] = 0.0f;
+    m_Vertices[3] = 1.0f; m_Vertices[4] = 0.0f; m_Vertices[5] = 0.0f;
+    m_Vertices[6] = 0.0f; m_Vertices[7] = 1.0f; m_Vertices[8] = 0.0f;
+    m_Vertices[9] = 0.0f; m_Vertices[10] = 0.0f; m_Vertices[11] = 1.0f;
+}
+
+Test3D::~Test3D()
+{
+    delete [] m_Vertices;
+}
+
+typedef jc_test_type1<Test3D> TestTypes;
+
+#elif defined(PHYSICS_TEST_BOX2D) || defined(PHYSICS_TEST_BOX2D_DEFOLD)
+
+#ifdef PHYSICS_TEST_BOX2D_DEFOLD
+    #include "../box2d_defold/box2d_defold_physics.h"
+#else
+    #include "../box2d/box2d_physics.h"
+#endif
+
+Test2D::Test2D()
+: m_NewContextFunc(dmPhysics::NewContext2D)
+, m_DeleteContextFunc(dmPhysics::DeleteContext2D)
+, m_NewWorldFunc(dmPhysics::NewWorld2D)
+, m_DeleteWorldFunc(dmPhysics::DeleteWorld2D)
+, m_StepWorldFunc(dmPhysics::StepWorld2D)
+, m_SetDrawDebugFunc(dmPhysics::SetDrawDebug2D)
+, m_NewBoxShapeFunc(dmPhysics::NewBoxShape2D)
+, m_NewSphereShapeFunc(dmPhysics::NewCircleShape2D)
+, m_NewCapsuleShapeFunc(0x0)
+, m_NewConvexHullShapeFunc(dmPhysics::NewPolygonShape2D)
+, m_DeleteCollisionShapeFunc(dmPhysics::DeleteCollisionShape2D)
+, m_NewCollisionObjectFunc(dmPhysics::NewCollisionObject2D)
+, m_NewCollisionObjectFunc2(dmPhysics::NewCollisionObject2D)
+, m_DeleteCollisionObjectFunc(dmPhysics::DeleteCollisionObject2D)
+, m_GetCollisionShapesFunc(dmPhysics::GetCollisionShapes2D)
+, m_SetCollisionObjectUserDataFunc(dmPhysics::SetCollisionObjectUserData2D)
+, m_GetCollisionObjectUserDataFunc(dmPhysics::GetCollisionObjectUserData2D)
+, m_ApplyForceFunc(dmPhysics::ApplyForce2D)
+, m_GetTotalForceFunc(dmPhysics::GetTotalForce2D)
+, m_GetWorldPositionFunc(dmPhysics::GetWorldPosition2D)
+, m_GetWorldRotationFunc(dmPhysics::GetWorldRotation2D)
+, m_GetLinearVelocityFunc(dmPhysics::GetLinearVelocity2D)
+, m_GetAngularVelocityFunc(dmPhysics::GetAngularVelocity2D)
+, m_SetLinearVelocityFunc(dmPhysics::SetLinearVelocity2D)
+, m_SetAngularVelocityFunc(dmPhysics::SetAngularVelocity2D)
+, m_IsEnabledFunc(dmPhysics::IsEnabled2D)
+, m_SetEnabledFunc(dmPhysics::SetEnabled2D)
+, m_IsSleepingFunc(dmPhysics::IsSleeping2D)
+, m_WakeupFunc(dmPhysics::Wakeup2D)
+, m_SetLockedRotationFunc(dmPhysics::SetLockedRotation2D)
+, m_GetLinearDampingFunc(dmPhysics::GetLinearDamping2D)
+, m_SetLinearDampingFunc(dmPhysics::SetLinearDamping2D)
+, m_GetAngularDampingFunc(dmPhysics::GetAngularDamping2D)
+, m_SetAngularDampingFunc(dmPhysics::SetAngularDamping2D)
+, m_GetMassFunc(dmPhysics::GetMass2D)
+, m_RequestRayCastFunc(dmPhysics::RequestRayCast2D)
+, m_RayCastFunc(dmPhysics::RayCast2D)
+, m_SetDebugCallbacksFunc(dmPhysics::SetDebugCallbacks2D)
+, m_ReplaceShapeFunc(dmPhysics::ReplaceShape2D)
+, m_SetGravityFunc(dmPhysics::SetGravity2D)
+, m_GetGravityFunc(dmPhysics::GetGravity2D)
+, m_Vertices(new float[3*2])
+, m_VertexCount(3)
+, m_PolygonRadius(b2_polygonRadius)
+, m_Is3D(false)
+{
+    m_Vertices[0] = 0.0f; m_Vertices[1] = 0.0f;
+    m_Vertices[2] = 1.0f; m_Vertices[3] = 0.0f;
+    m_Vertices[4] = 0.0f; m_Vertices[5] = 1.0f;
+}
+
+Test2D::~Test2D()
+{
+    delete [] m_Vertices;
+}
+
+typedef jc_test_type1<Test2D> TestTypes;
+
+#else
+    #error "No physics test defined"
+#endif
+
+TYPED_TEST_CASE(PhysicsTest, TestTypes);
+TYPED_TEST_CASE(PhysicsPrecisionRoundingTest, TestTypes);
+
+TYPED_TEST(PhysicsTest, BoxShape)
+{
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(1.0f, 1.0f, 1.0f));
+    typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, SphereShape)
+{
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, 1.0f);
+    typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, CapsuleShape)
+{
+    if (TestFixture::m_Test.m_NewCapsuleShapeFunc != 0x0)
+    {
+        dmPhysics::CollisionObjectData data;
+        typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewCapsuleShapeFunc)(TestFixture::m_Context, 0.5f, 1.0f);
+        typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+        (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+        (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+    }
+}
+
+TYPED_TEST(PhysicsTest, ConvexHullShape)
+{
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewConvexHullShapeFunc)(TestFixture::m_Context, TestFixture::m_Test.m_Vertices, TestFixture::m_Test.m_VertexCount);
+    typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+#if defined(PHYSICS_TEST_BULLET_3D)
+static const float TRIANGLE_MESH_TEST_CUBE_VERTICES[] = {
+    -0.5f, -0.5f, -0.5f,
+     0.5f, -0.5f, -0.5f,
+     0.5f, -0.5f,  0.5f,
+    -0.5f, -0.5f,  0.5f,
+    -0.5f,  0.5f, -0.5f,
+     0.5f,  0.5f, -0.5f,
+     0.5f,  0.5f,  0.5f,
+    -0.5f,  0.5f,  0.5f,
+};
+
+static const uint32_t TRIANGLE_MESH_TEST_CUBE_INDICES[] = {
+    0, 2, 1, 0, 3, 2,
+    4, 5, 6, 4, 6, 7,
+    0, 1, 5, 0, 5, 4,
+    1, 2, 6, 1, 6, 5,
+    2, 3, 7, 2, 7, 6,
+    3, 0, 4, 3, 4, 7,
+};
+
+static const uint32_t TRIANGLE_MESH_TEST_CUBE_VERTEX_COUNT =
+    sizeof(TRIANGLE_MESH_TEST_CUBE_VERTICES) / (3 * sizeof(float));
+static const uint32_t TRIANGLE_MESH_TEST_CUBE_INDEX_COUNT = sizeof(TRIANGLE_MESH_TEST_CUBE_INDICES) / sizeof(uint32_t);
+
+static void AssertTriangleMeshGeometryShared(btTriangleIndexVertexArray* source_interface,
+                                             btTriangleIndexVertexArray* clone_a_interface,
+                                             btTriangleIndexVertexArray* clone_b_interface,
+                                             const float* vertices, uint32_t vertex_count,
+                                             const uint32_t* indices, uint32_t index_count)
+{
+    ASSERT_NE((void*)source_interface, (void*)clone_a_interface);
+    ASSERT_NE((void*)source_interface, (void*)clone_b_interface);
+    ASSERT_NE((void*)clone_a_interface, (void*)clone_b_interface);
+    ASSERT_EQ(1, source_interface->getNumSubParts());
+    ASSERT_EQ(1, clone_a_interface->getNumSubParts());
+    ASSERT_EQ(1, clone_b_interface->getNumSubParts());
+
+    const btIndexedMesh& source_mesh = source_interface->getIndexedMeshArray()[0];
+    const btIndexedMesh& clone_a_mesh = clone_a_interface->getIndexedMeshArray()[0];
+    const btIndexedMesh& clone_b_mesh = clone_b_interface->getIndexedMeshArray()[0];
+    ASSERT_EQ((const void*)source_mesh.m_vertexBase, (const void*)clone_a_mesh.m_vertexBase);
+    ASSERT_EQ((const void*)source_mesh.m_vertexBase, (const void*)clone_b_mesh.m_vertexBase);
+    ASSERT_EQ((const void*)source_mesh.m_triangleIndexBase, (const void*)clone_a_mesh.m_triangleIndexBase);
+    ASSERT_EQ((const void*)source_mesh.m_triangleIndexBase, (const void*)clone_b_mesh.m_triangleIndexBase);
+    ASSERT_EQ((int)vertex_count, source_mesh.m_numVertices);
+    ASSERT_EQ((int)index_count / 3, source_mesh.m_numTriangles);
+    ASSERT_EQ(source_mesh.m_numVertices, clone_a_mesh.m_numVertices);
+    ASSERT_EQ(source_mesh.m_numVertices, clone_b_mesh.m_numVertices);
+    ASSERT_EQ(source_mesh.m_numTriangles, clone_a_mesh.m_numTriangles);
+    ASSERT_EQ(source_mesh.m_numTriangles, clone_b_mesh.m_numTriangles);
+    ASSERT_EQ(source_mesh.m_vertexStride, clone_a_mesh.m_vertexStride);
+    ASSERT_EQ(source_mesh.m_vertexStride, clone_b_mesh.m_vertexStride);
+    ASSERT_EQ(source_mesh.m_triangleIndexStride, clone_a_mesh.m_triangleIndexStride);
+    ASSERT_EQ(source_mesh.m_triangleIndexStride, clone_b_mesh.m_triangleIndexStride);
+    ASSERT_EQ(source_mesh.m_vertexType, clone_a_mesh.m_vertexType);
+    ASSERT_EQ(source_mesh.m_vertexType, clone_b_mesh.m_vertexType);
+    ASSERT_EQ(source_mesh.m_indexType, clone_a_mesh.m_indexType);
+    ASSERT_EQ(source_mesh.m_indexType, clone_b_mesh.m_indexType);
+
+    const float* shared_vertices = (const float*)source_mesh.m_vertexBase;
+    const uint32_t* shared_indices = (const uint32_t*)source_mesh.m_triangleIndexBase;
+    for (uint32_t i = 0; i < vertex_count * 3; ++i)
+    {
+        ASSERT_NEAR(vertices[i] * PHYSICS_SCALE, shared_vertices[i], 0.000001f);
+    }
+    for (uint32_t i = 0; i < index_count; ++i)
+    {
+        ASSERT_EQ(indices[i], shared_indices[i]);
+    }
+}
+
+static void AssertUniformScale(const btVector3& scaling, btScalar expected_scale)
+{
+    ASSERT_NEAR(expected_scale, scaling.getX(), 0.000001f);
+    ASSERT_NEAR(expected_scale, scaling.getY(), 0.000001f);
+    ASSERT_NEAR(expected_scale, scaling.getZ(), 0.000001f);
+}
+
+static void AssertTriangleMeshRayCastHit(dmPhysics::HWorld3D world, const Point3& from, const Point3& to,
+                                         void* expected_user_data)
+{
+    dmArray<dmPhysics::RayCastResponse> hits;
+    hits.SetCapacity(4);
+
+    dmPhysics::RayCastRequest request;
+    hits.SetSize(0);
+    request.m_From = from;
+    request.m_To = to;
+    request.m_Mask = 0xffff;
+    request.m_ReturnAllResults = 0;
+    request.m_UserId = 0;
+    dmPhysics::RayCast3D(world, request, hits);
+
+    ASSERT_EQ(1u, hits.Size());
+    ASSERT_EQ(expected_user_data, hits[0].m_CollisionObjectUserData);
+}
+
+TYPED_TEST(PhysicsTest, TriangleMeshShapes)
+{
+    const float ground_vertices[] = {
+        -10.0f, 0.0f, -10.0f,
+         10.0f, 0.0f, -10.0f,
+         10.0f, 0.0f,  10.0f,
+        -10.0f, 0.0f,  10.0f,
+    };
+    const uint32_t ground_indices[] = {0, 2, 1, 0, 3, 2};
+    dmPhysics::HCollisionShape3D ground_shape = dmPhysics::NewTriangleMeshShape3D(
+        TestFixture::m_Context, ground_vertices, 4, ground_indices, 6, dmPhysics::COLLISION_OBJECT_TYPE_STATIC);
+
+    VisualObject ground_visual_object;
+    dmPhysics::CollisionObjectData ground_data;
+    ground_data.m_UserData = &ground_visual_object;
+    ground_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    ground_data.m_Mass = 0.0f;
+    dmPhysics::HCollisionObject3D ground_object = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, ground_data, &ground_shape, 1);
+
+    const float mesh_vertices[] = {
+        -0.5f, 0.0f, -0.5f,
+         0.5f, 0.0f, -0.5f,
+         0.0f, 0.0f,  0.5f,
+         0.0f, 1.0f,  0.0f,
+    };
+    const uint32_t mesh_indices[] = {0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3};
+    dmPhysics::HCollisionShape3D mesh_shape = dmPhysics::NewTriangleMeshShape3D(
+        TestFixture::m_Context, mesh_vertices, 4, mesh_indices, 12, dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC);
+
+    VisualObject mesh_visual_object;
+    mesh_visual_object.m_Position = Point3(0.0f, 3.0f, 0.0f);
+    dmPhysics::CollisionObjectData mesh_data;
+    mesh_data.m_UserData = &mesh_visual_object;
+    dmPhysics::HCollisionObject3D mesh_object = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, mesh_data, &mesh_shape, 1);
+
+    for (uint32_t i = 0; i < 240 && mesh_visual_object.m_CollisionCount == 0; ++i)
+    {
+        dmPhysics::StepWorld3D(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    ASSERT_GT(mesh_visual_object.m_CollisionCount, 0);
+    ASSERT_GT(ground_visual_object.m_CollisionCount, 0);
+
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, mesh_object);
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, ground_object);
+    dmPhysics::DeleteCollisionShape3D(mesh_shape);
+    dmPhysics::DeleteCollisionShape3D(ground_shape);
+}
+
+TYPED_TEST(PhysicsTest, TriangleMeshMixedCompoundScaling)
+{
+    TestFixture::RecreateContextAndWorld(PHYSICS_SCALE, true);
+
+    const float mesh_vertices[] = {
+        -0.5f, 0.0f, -0.5f,
+         0.5f, 0.0f, -0.5f,
+         0.0f, 0.0f,  0.5f,
+         0.0f, 1.0f,  0.0f,
+    };
+    const uint32_t mesh_indices[] = {0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3};
+    dmPhysics::HCollisionShape3D shapes[] = {
+        dmPhysics::NewTriangleMeshShape3D(TestFixture::m_Context, mesh_vertices, 4, mesh_indices, 12,
+                                          dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC),
+        dmPhysics::NewBoxShape3D(TestFixture::m_Context, Vector3(0.5f, 0.5f, 0.5f)),
+    };
+    Vector3 translations[] = {Vector3(-1.0f, 0.0f, 0.0f), Vector3(1.0f, 0.0f, 0.0f)};
+    Quat rotations[] = {Quat::identity(), Quat::identity()};
+
+    VisualObject visual_object;
+    visual_object.m_Position = Point3(0.0f, 10.0f, 0.0f);
+    visual_object.m_Scale = 1.5f;
+    dmPhysics::CollisionObjectData data;
+    data.m_UserData = &visual_object;
+    dmPhysics::HCollisionObject3D collision_object = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, data, shapes, translations, rotations, 2);
+
+    dmPhysics::HCollisionShape3D object_shapes[2];
+    ASSERT_EQ(2, dmPhysics::GetCollisionShapes3D(collision_object, object_shapes, 2));
+
+    visual_object.m_Scale = 2.0f;
+    dmPhysics::StepWorld3D(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, collision_object);
+    dmPhysics::DeleteCollisionShape3D(shapes[0]);
+    dmPhysics::DeleteCollisionShape3D(shapes[1]);
+}
+
+TYPED_TEST(PhysicsTest, BvhTriangleMeshClonesShareGeometry)
+{
+    TestFixture::RecreateContextAndWorld(PHYSICS_SCALE, false);
+
+    dmPhysics::HCollisionShape3D mesh_shape = dmPhysics::NewTriangleMeshShape3D(
+        TestFixture::m_Context,
+        TRIANGLE_MESH_TEST_CUBE_VERTICES, TRIANGLE_MESH_TEST_CUBE_VERTEX_COUNT,
+        TRIANGLE_MESH_TEST_CUBE_INDICES, TRIANGLE_MESH_TEST_CUBE_INDEX_COUNT,
+        dmPhysics::COLLISION_OBJECT_TYPE_STATIC);
+
+    VisualObject visual_object_a;
+    visual_object_a.m_Position = Point3(-6.0f, 0.0f, 0.0f);
+    visual_object_a.m_Scale = 2.0f;
+    dmPhysics::CollisionObjectData data_a;
+    data_a.m_UserData = &visual_object_a;
+    data_a.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    data_a.m_Mass = 0.0f;
+    dmPhysics::HCollisionObject3D object_a = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, data_a, &mesh_shape, 1);
+
+    VisualObject visual_object_b;
+    visual_object_b.m_Position = Point3(6.0f, 0.0f, 0.0f);
+    visual_object_b.m_Scale = 3.0f;
+    dmPhysics::CollisionObjectData data_b;
+    data_b.m_UserData = &visual_object_b;
+    data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    data_b.m_Mass = 0.0f;
+    dmPhysics::HCollisionObject3D object_b = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, data_b, &mesh_shape, 1);
+
+    dmPhysics::HCollisionShape3D clone_a_handle = 0;
+    dmPhysics::HCollisionShape3D clone_b_handle = 0;
+    ASSERT_EQ(1, dmPhysics::GetCollisionShapes3D(object_a, &clone_a_handle, 1));
+    ASSERT_EQ(1, dmPhysics::GetCollisionShapes3D(object_b, &clone_b_handle, 1));
+    ASSERT_NE(mesh_shape, clone_a_handle);
+    ASSERT_NE(mesh_shape, clone_b_handle);
+
+    btCollisionShape* source_collision_shape = (btCollisionShape*)mesh_shape;
+    btCollisionShape* clone_a_collision_shape = (btCollisionShape*)clone_a_handle;
+    btCollisionShape* clone_b_collision_shape = (btCollisionShape*)clone_b_handle;
+    btBvhTriangleMeshShape* source_shape = static_cast<btBvhTriangleMeshShape*>(source_collision_shape);
+    btBvhTriangleMeshShape* clone_a_shape = static_cast<btBvhTriangleMeshShape*>(clone_a_collision_shape);
+    btBvhTriangleMeshShape* clone_b_shape = static_cast<btBvhTriangleMeshShape*>(clone_b_collision_shape);
+    btTriangleIndexVertexArray* source_interface =
+        static_cast<btTriangleIndexVertexArray*>(source_shape->getMeshInterface());
+    btTriangleIndexVertexArray* clone_a_interface =
+        static_cast<btTriangleIndexVertexArray*>(clone_a_shape->getMeshInterface());
+    btTriangleIndexVertexArray* clone_b_interface =
+        static_cast<btTriangleIndexVertexArray*>(clone_b_shape->getMeshInterface());
+
+    AssertTriangleMeshGeometryShared(source_interface, clone_a_interface, clone_b_interface,
+                                     TRIANGLE_MESH_TEST_CUBE_VERTICES, TRIANGLE_MESH_TEST_CUBE_VERTEX_COUNT,
+                                     TRIANGLE_MESH_TEST_CUBE_INDICES, TRIANGLE_MESH_TEST_CUBE_INDEX_COUNT);
+    AssertUniformScale(source_shape->getLocalScaling(), 1.0f);
+    AssertUniformScale(clone_a_shape->getLocalScaling(), 2.0f);
+    AssertUniformScale(clone_b_shape->getLocalScaling(), 3.0f);
+
+    dmPhysics::DeleteCollisionShape3D(mesh_shape);
+    AssertTriangleMeshRayCastHit(TestFixture::m_World, Point3(-6.0f, 3.0f, 0.0f),
+                                 Point3(-6.0f, -3.0f, 0.0f), &visual_object_a);
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, object_a);
+    AssertTriangleMeshRayCastHit(TestFixture::m_World, Point3(6.0f, 3.0f, 0.0f),
+                                 Point3(6.0f, -3.0f, 0.0f), &visual_object_b);
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, object_b);
+}
+
+TYPED_TEST(PhysicsTest, UnscaledStaticTriangleMeshSharesShapeWithDynamicTransforms)
+{
+    TestFixture::RecreateContextAndWorld(PHYSICS_SCALE, true);
+
+    dmPhysics::HCollisionShape3D mesh_shape = dmPhysics::NewTriangleMeshShape3D(
+        TestFixture::m_Context,
+        TRIANGLE_MESH_TEST_CUBE_VERTICES, TRIANGLE_MESH_TEST_CUBE_VERTEX_COUNT,
+        TRIANGLE_MESH_TEST_CUBE_INDICES, TRIANGLE_MESH_TEST_CUBE_INDEX_COUNT,
+        dmPhysics::COLLISION_OBJECT_TYPE_STATIC);
+
+    VisualObject unscaled_visual_object;
+    unscaled_visual_object.m_Position = Point3(-6.0f, 0.0f, 0.0f);
+    dmPhysics::CollisionObjectData unscaled_data;
+    unscaled_data.m_UserData = &unscaled_visual_object;
+    unscaled_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    unscaled_data.m_Mass = 0.0f;
+    dmPhysics::HCollisionObject3D unscaled_object = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, unscaled_data, &mesh_shape, 1);
+
+    VisualObject scaled_visual_object;
+    scaled_visual_object.m_Position = Point3(6.0f, 0.0f, 0.0f);
+    scaled_visual_object.m_Scale = 2.0f;
+    dmPhysics::CollisionObjectData scaled_data;
+    scaled_data.m_UserData = &scaled_visual_object;
+    scaled_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    scaled_data.m_Mass = 0.0f;
+    dmPhysics::HCollisionObject3D scaled_object = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, scaled_data, &mesh_shape, 1);
+
+    dmPhysics::HCollisionShape3D unscaled_object_shape = 0;
+    dmPhysics::HCollisionShape3D scaled_object_shape = 0;
+    ASSERT_EQ(1, dmPhysics::GetCollisionShapes3D(unscaled_object, &unscaled_object_shape, 1));
+    ASSERT_EQ(1, dmPhysics::GetCollisionShapes3D(scaled_object, &scaled_object_shape, 1));
+    ASSERT_EQ(mesh_shape, unscaled_object_shape);
+    ASSERT_NE(mesh_shape, scaled_object_shape);
+
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, unscaled_object);
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, scaled_object);
+    dmPhysics::DeleteCollisionShape3D(mesh_shape);
+}
+
+TYPED_TEST(PhysicsTest, GImpactTriangleMeshClonesShareGeometry)
+{
+    TestFixture::RecreateContextAndWorld(PHYSICS_SCALE, false);
+
+    dmPhysics::HCollisionShape3D mesh_shape = dmPhysics::NewTriangleMeshShape3D(
+        TestFixture::m_Context,
+        TRIANGLE_MESH_TEST_CUBE_VERTICES, TRIANGLE_MESH_TEST_CUBE_VERTEX_COUNT,
+        TRIANGLE_MESH_TEST_CUBE_INDICES, TRIANGLE_MESH_TEST_CUBE_INDEX_COUNT,
+        dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC);
+
+    VisualObject visual_object_a;
+    visual_object_a.m_Position = Point3(-6.0f, 0.0f, 0.0f);
+    visual_object_a.m_Scale = 2.0f;
+    dmPhysics::CollisionObjectData data_a;
+    data_a.m_UserData = &visual_object_a;
+    data_a.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC;
+    data_a.m_Mass = 1.0f;
+    dmPhysics::HCollisionObject3D object_a = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, data_a, &mesh_shape, 1);
+
+    VisualObject visual_object_b;
+    visual_object_b.m_Position = Point3(6.0f, 0.0f, 0.0f);
+    visual_object_b.m_Scale = 3.0f;
+    dmPhysics::CollisionObjectData data_b;
+    data_b.m_UserData = &visual_object_b;
+    data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC;
+    data_b.m_Mass = 1.0f;
+    dmPhysics::HCollisionObject3D object_b = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, data_b, &mesh_shape, 1);
+
+    dmPhysics::HCollisionShape3D clone_a_handle = 0;
+    dmPhysics::HCollisionShape3D clone_b_handle = 0;
+    ASSERT_EQ(1, dmPhysics::GetCollisionShapes3D(object_a, &clone_a_handle, 1));
+    ASSERT_EQ(1, dmPhysics::GetCollisionShapes3D(object_b, &clone_b_handle, 1));
+    ASSERT_NE(mesh_shape, clone_a_handle);
+    ASSERT_NE(mesh_shape, clone_b_handle);
+
+    btCollisionShape* source_collision_shape = (btCollisionShape*)mesh_shape;
+    btCollisionShape* clone_a_collision_shape = (btCollisionShape*)clone_a_handle;
+    btCollisionShape* clone_b_collision_shape = (btCollisionShape*)clone_b_handle;
+    btGImpactMeshShape* source_shape = static_cast<btGImpactMeshShape*>(source_collision_shape);
+    btGImpactMeshShape* clone_a_shape = static_cast<btGImpactMeshShape*>(clone_a_collision_shape);
+    btGImpactMeshShape* clone_b_shape = static_cast<btGImpactMeshShape*>(clone_b_collision_shape);
+    btTriangleIndexVertexArray* source_interface =
+        static_cast<btTriangleIndexVertexArray*>(source_shape->getMeshInterface());
+    btTriangleIndexVertexArray* clone_a_interface =
+        static_cast<btTriangleIndexVertexArray*>(clone_a_shape->getMeshInterface());
+    btTriangleIndexVertexArray* clone_b_interface =
+        static_cast<btTriangleIndexVertexArray*>(clone_b_shape->getMeshInterface());
+
+    AssertTriangleMeshGeometryShared(source_interface, clone_a_interface, clone_b_interface,
+                                     TRIANGLE_MESH_TEST_CUBE_VERTICES, TRIANGLE_MESH_TEST_CUBE_VERTEX_COUNT,
+                                     TRIANGLE_MESH_TEST_CUBE_INDICES, TRIANGLE_MESH_TEST_CUBE_INDEX_COUNT);
+    AssertUniformScale(source_shape->getLocalScaling(), 1.0f);
+    AssertUniformScale(clone_a_shape->getLocalScaling(), 2.0f);
+    AssertUniformScale(clone_b_shape->getLocalScaling(), 3.0f);
+    ASSERT_EQ(1, source_shape->getMeshPartCount());
+    ASSERT_EQ(1, clone_a_shape->getMeshPartCount());
+    ASSERT_EQ(1, clone_b_shape->getMeshPartCount());
+    AssertUniformScale(source_shape->getMeshPart(0)->getLocalScaling(), 1.0f);
+    AssertUniformScale(clone_a_shape->getMeshPart(0)->getLocalScaling(), 2.0f);
+    AssertUniformScale(clone_b_shape->getMeshPart(0)->getLocalScaling(), 3.0f);
+
+    dmPhysics::DeleteCollisionShape3D(mesh_shape);
+    AssertTriangleMeshRayCastHit(TestFixture::m_World, Point3(-6.0f, 3.0f, 0.0f),
+                                 Point3(-6.0f, -3.0f, 0.0f), &visual_object_a);
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, object_a);
+    AssertTriangleMeshRayCastHit(TestFixture::m_World, Point3(6.0f, 3.0f, 0.0f),
+                                 Point3(6.0f, -3.0f, 0.0f), &visual_object_b);
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, object_b);
+}
+
+TYPED_TEST(PhysicsTest, TriangleMeshClonePreservesMargin)
+{
+    TestFixture::RecreateContextAndWorld(PHYSICS_SCALE, false);
+
+    const float mesh_vertices[] = {
+        -0.5f, 0.0f, -0.5f,
+         0.5f, 0.0f, -0.5f,
+         0.0f, 0.0f,  0.5f,
+         0.0f, 1.0f,  0.0f,
+    };
+    const uint32_t mesh_indices[] = {0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3};
+    dmPhysics::HCollisionShape3D mesh_shape = dmPhysics::NewTriangleMeshShape3D(
+        TestFixture::m_Context, mesh_vertices, 4, mesh_indices, 12, dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC);
+
+    btCollisionShape* source_collision_shape = (btCollisionShape*)mesh_shape;
+    btGImpactMeshShape* source_shape = static_cast<btGImpactMeshShape*>(source_collision_shape);
+    ASSERT_EQ(1, source_shape->getMeshPartCount());
+    const btScalar source_margin = source_shape->getMeshPart(0)->getMargin();
+    ASSERT_GT(source_margin, btScalar(0.0f));
+    ASSERT_NEAR(source_margin, source_shape->getMargin(), 0.000001f);
+
+    VisualObject visual_object;
+    visual_object.m_Scale = 2.0f;
+    dmPhysics::CollisionObjectData data;
+    data.m_UserData = &visual_object;
+    dmPhysics::HCollisionObject3D collision_object = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, data, &mesh_shape, 1);
+
+    dmPhysics::HCollisionShape3D cloned_shape_handle = 0;
+    ASSERT_EQ(1, dmPhysics::GetCollisionShapes3D(collision_object, &cloned_shape_handle, 1));
+    ASSERT_NE(mesh_shape, cloned_shape_handle);
+    btCollisionShape* cloned_collision_shape = (btCollisionShape*)cloned_shape_handle;
+    btGImpactMeshShape* cloned_shape = static_cast<btGImpactMeshShape*>(cloned_collision_shape);
+    ASSERT_EQ(1, cloned_shape->getMeshPartCount());
+    ASSERT_NEAR(source_margin, cloned_shape->getMargin(), 0.000001f);
+    ASSERT_NEAR(source_margin, cloned_shape->getMeshPart(0)->getMargin(), 0.000001f);
+
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, collision_object);
+    dmPhysics::DeleteCollisionShape3D(mesh_shape);
+}
+
+TYPED_TEST(PhysicsTest, TriangleMeshDynamicScalingUpdatesBounds)
+{
+    TestFixture::RecreateContextAndWorld(PHYSICS_SCALE, true);
+
+    const float ground_vertices[] = {
+        -10.0f, 0.0f, -10.0f,
+         10.0f, 0.0f, -10.0f,
+         10.0f, 0.0f,  10.0f,
+        -10.0f, 0.0f,  10.0f,
+    };
+    const uint32_t ground_indices[] = {0, 2, 1, 0, 3, 2};
+    dmPhysics::HCollisionShape3D ground_shape = dmPhysics::NewTriangleMeshShape3D(
+        TestFixture::m_Context, ground_vertices, 4, ground_indices, 6, dmPhysics::COLLISION_OBJECT_TYPE_STATIC);
+
+    VisualObject ground_visual_object;
+    dmPhysics::CollisionObjectData ground_data;
+    ground_data.m_UserData = &ground_visual_object;
+    ground_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    ground_data.m_Mass = 0.0f;
+    dmPhysics::HCollisionObject3D ground_object = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, ground_data, &ground_shape, 1);
+
+    const float mesh_vertices[] = {
+        -0.5f, -0.5f, -0.5f,
+         0.5f, -0.5f, -0.5f,
+         0.0f, -0.5f,  0.5f,
+         0.0f,  0.5f,  0.0f,
+    };
+    const uint32_t mesh_indices[] = {0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3};
+    dmPhysics::HCollisionShape3D mesh_shape = dmPhysics::NewTriangleMeshShape3D(
+        TestFixture::m_Context, mesh_vertices, 4, mesh_indices, 12, dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC);
+
+    VisualObject mesh_visual_object;
+    mesh_visual_object.m_Position = Point3(0.0f, 6.0f, 0.0f);
+    mesh_visual_object.m_Scale = 4.0f;
+    dmPhysics::CollisionObjectData mesh_data;
+    mesh_data.m_UserData = &mesh_visual_object;
+    dmPhysics::HCollisionObject3D mesh_object = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, mesh_data, &mesh_shape, 1);
+
+    for (uint32_t i = 0; i < 240 && mesh_visual_object.m_CollisionCount == 0; ++i)
+    {
+        dmPhysics::StepWorld3D(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    ASSERT_GT(mesh_visual_object.m_CollisionCount, 0);
+    ASSERT_GT(mesh_visual_object.m_Position.getY(), 1.5f);
+
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, mesh_object);
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, ground_object);
+    dmPhysics::DeleteCollisionShape3D(mesh_shape);
+    dmPhysics::DeleteCollisionShape3D(ground_shape);
+}
+
+TYPED_TEST(PhysicsTest, TriangleMeshScaledCubeSettles)
+{
+    TestFixture::RecreateContextAndWorld(PHYSICS_SCALE, true);
+
+    const float ground_vertices[] = {
+        -10.0f, 0.0f, -10.0f,
+         10.0f, 0.0f, -10.0f,
+         10.0f, 0.0f,  10.0f,
+        -10.0f, 0.0f,  10.0f,
+    };
+    const uint32_t ground_indices[] = {0, 2, 1, 0, 3, 2};
+    dmPhysics::HCollisionShape3D ground_shape = dmPhysics::NewTriangleMeshShape3D(
+        TestFixture::m_Context, ground_vertices, 4, ground_indices, 6, dmPhysics::COLLISION_OBJECT_TYPE_STATIC);
+
+    VisualObject ground_visual_object;
+    dmPhysics::CollisionObjectData ground_data;
+    ground_data.m_UserData = &ground_visual_object;
+    ground_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    ground_data.m_Mass = 0.0f;
+    dmPhysics::HCollisionObject3D ground_object = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, ground_data, &ground_shape, 1);
+
+    const float cube_vertices[] = {
+        -0.5f, -0.5f, -0.5f,
+         0.5f, -0.5f, -0.5f,
+         0.5f, -0.5f,  0.5f,
+        -0.5f, -0.5f,  0.5f,
+        -0.5f,  0.5f, -0.5f,
+         0.5f,  0.5f, -0.5f,
+         0.5f,  0.5f,  0.5f,
+        -0.5f,  0.5f,  0.5f,
+    };
+    const uint32_t cube_indices[] = {
+        0, 2, 1, 0, 3, 2,
+        4, 5, 6, 4, 6, 7,
+        0, 1, 5, 0, 5, 4,
+        1, 2, 6, 1, 6, 5,
+        2, 3, 7, 2, 7, 6,
+        3, 0, 4, 3, 4, 7,
+    };
+    dmPhysics::HCollisionShape3D cube_shape = dmPhysics::NewTriangleMeshShape3D(
+        TestFixture::m_Context, cube_vertices, 8, cube_indices, 36, dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC);
+
+    VisualObject cube_visual_object;
+    cube_visual_object.m_Position = Point3(0.0f, 8.0f, 0.0f);
+    cube_visual_object.m_Scale = 4.0f;
+    dmPhysics::CollisionObjectData cube_data;
+    cube_data.m_UserData = &cube_visual_object;
+    cube_data.m_Mass = 64.0f;
+    cube_data.m_LinearDamping = 0.15f;
+    cube_data.m_AngularDamping = 0.2f;
+    dmPhysics::HCollisionObject3D cube_object = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, cube_data, &cube_shape, 1);
+
+    for (uint32_t i = 0; i < 600; ++i)
+    {
+        dmPhysics::StepWorld3D(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    ASSERT_TRUE(dmPhysics::IsSleeping3D(cube_object));
+    ASSERT_NEAR(2.0f, cube_visual_object.m_Position.getY(), 0.05f);
+
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, cube_object);
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, ground_object);
+    dmPhysics::DeleteCollisionShape3D(cube_shape);
+    dmPhysics::DeleteCollisionShape3D(ground_shape);
+}
+
+TYPED_TEST(PhysicsTest, DynamicScalingUpdatesInertia)
+{
+    TestFixture::RecreateContextAndWorld(PHYSICS_SCALE, true);
+    dmPhysics::SetGravity3D(TestFixture::m_World, Vector3(0.0f, 0.0f, 0.0f));
+
+    VisualObject initially_scaled_visual_object;
+    initially_scaled_visual_object.m_Position = Point3(-10.0f, 0.0f, 0.0f);
+    initially_scaled_visual_object.m_Scale = 2.0f;
+    dmPhysics::CollisionObjectData initially_scaled_data;
+    initially_scaled_data.m_UserData = &initially_scaled_visual_object;
+
+    VisualObject dynamically_scaled_visual_object;
+    dynamically_scaled_visual_object.m_Position = Point3(10.0f, 0.0f, 0.0f);
+    dmPhysics::CollisionObjectData dynamically_scaled_data;
+    dynamically_scaled_data.m_UserData = &dynamically_scaled_visual_object;
+
+    dmPhysics::HCollisionShape3D shape = dmPhysics::NewBoxShape3D(TestFixture::m_Context, Vector3(0.5f, 0.5f, 0.5f));
+    dmPhysics::HCollisionObject3D initially_scaled_object = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, initially_scaled_data, &shape, 1);
+    dmPhysics::HCollisionObject3D dynamically_scaled_object = dmPhysics::NewCollisionObject3D(
+        TestFixture::m_World, dynamically_scaled_data, &shape, 1);
+
+    dynamically_scaled_visual_object.m_Scale = 2.0f;
+    TestFixture::m_StepWorldContext.m_DT = 0.0f;
+    dmPhysics::StepWorld3D(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    const Vector3 force(0.0f, 10.0f, 0.0f);
+    dmPhysics::ApplyForce3D(TestFixture::m_Context, initially_scaled_object, force,
+                            initially_scaled_visual_object.m_Position + Vector3(1.0f, 0.0f, 0.0f));
+    dmPhysics::ApplyForce3D(TestFixture::m_Context, dynamically_scaled_object, force,
+                            dynamically_scaled_visual_object.m_Position + Vector3(1.0f, 0.0f, 0.0f));
+
+    TestFixture::m_StepWorldContext.m_DT = 1.0f / 60.0f;
+    dmPhysics::StepWorld3D(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    Vector3 initially_scaled_angular_velocity = dmPhysics::GetAngularVelocity3D(TestFixture::m_Context, initially_scaled_object);
+    Vector3 dynamically_scaled_angular_velocity = dmPhysics::GetAngularVelocity3D(TestFixture::m_Context, dynamically_scaled_object);
+    for (uint32_t i = 0; i < 3; ++i)
+    {
+        ASSERT_NEAR(initially_scaled_angular_velocity.getElem(i), dynamically_scaled_angular_velocity.getElem(i), 0.000001f);
+    }
+
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, dynamically_scaled_object);
+    dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, initially_scaled_object);
+    dmPhysics::DeleteCollisionShape3D(shape);
+}
+
+TYPED_TEST(PhysicsTest, TriangleMeshKinematicAndTrigger)
+{
+    const float vertices[] = {
+        -0.5f, 0.0f, -0.5f,
+         0.5f, 0.0f, -0.5f,
+         0.0f, 0.0f,  0.5f,
+         0.0f, 1.0f,  0.0f,
+    };
+    const uint32_t indices[] = {0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3};
+    const dmPhysics::CollisionObjectType object_types[] = {
+        dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC,
+        dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER,
+    };
+
+    for (uint32_t i = 0; i < sizeof(object_types) / sizeof(object_types[0]); ++i)
+    {
+        dmPhysics::HCollisionShape3D shape = dmPhysics::NewTriangleMeshShape3D(
+            TestFixture::m_Context, vertices, 4, indices, 12, object_types[i]);
+        VisualObject visual_object;
+        dmPhysics::CollisionObjectData data;
+        data.m_UserData = &visual_object;
+        data.m_Type = object_types[i];
+        data.m_Mass = 0.0f;
+        dmPhysics::HCollisionObject3D collision_object = dmPhysics::NewCollisionObject3D(
+            TestFixture::m_World, data, &shape, 1);
+
+        ASSERT_NE((dmPhysics::HCollisionShape3D)0,  shape);
+        ASSERT_NE((dmPhysics::HCollisionObject3D)0, collision_object);
+
+        dmPhysics::DeleteCollisionObject3D(TestFixture::m_World, collision_object);
+        dmPhysics::DeleteCollisionShape3D(shape);
+    }
+}
+#endif
+
+TYPED_TEST(PhysicsTest, DynamicConstruction)
+{
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(1.0f, 1.0f, 1.0f));
+    data.m_Mass = 0.0f;
+    typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_EQ((void*)0, (void*)co);
+
+    data.m_Mass = 1.0f;
+    data.m_LinearDamping = 0.5f;
+    data.m_AngularDamping = 0.25f;
+    co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_NE((void*)0, (void*)co);
+
+    ASSERT_NEAR(1.0f, (*TestFixture::m_Test.m_GetMassFunc)(co), 0.000001f);
+    ASSERT_NEAR(0.5f, (*TestFixture::m_Test.m_GetLinearDampingFunc)(co), 0.000001f);
+    ASSERT_NEAR(0.25f, (*TestFixture::m_Test.m_GetAngularDampingFunc)(co), 0.000001f);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, KinematicConstruction)
+{
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(1.0f, 1.0f, 1.0f));
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_EQ((void*)0, (void*)co);
+
+    data.m_Mass = 0.0f;
+    co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_NE((void*)0, (void*)co);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, StaticConstruction)
+{
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(1.0f, 1.0f, 1.0f));
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_EQ((void*)0, (void*)co);
+
+    data.m_Mass = 0.0f;
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_NE((void*)0, (void*)co);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, TriggerConstruction)
+{
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(1.0f, 1.0f, 1.0f));
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER;
+    typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_EQ((void*)0, (void*)co);
+
+    data.m_Mass = 0.0f;
+    co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_NE((void*)0, (void*)co);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, WorldTransformCallbacks)
+{
+    VisualObject vo;
+
+    // Dynamic RB
+
+    Point3 start_pos(1.0f, 2.0f, 0.0f);
+    float pi_4 = (float) (M_PI * 0.25);
+    Quat start_rot(0.0f, 0.0f, sin(pi_4), cos(pi_4));
+    vo.m_Position = start_pos;
+    vo.m_Rotation = start_rot;
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(1.0f, 1.0f, 1.0f));
+    data.m_UserData = &vo;
+    typename TypeParam::CollisionObjectType dynamic_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    Point3 body_pos = (*TestFixture::m_Test.m_GetWorldPositionFunc)(TestFixture::m_Context, dynamic_co);
+    for (int i = 0; i < 3; ++i)
+    {
+        ASSERT_EQ(start_pos.getElem(i), vo.m_Position.getElem(i));
+        ASSERT_EQ(start_pos.getElem(i), body_pos.getElem(i));
+    }
+    Quat body_rot = (*TestFixture::m_Test.m_GetWorldRotationFunc)(TestFixture::m_Context, dynamic_co);
+    for (int i = 0; i < 4; ++i)
+    {
+        ASSERT_EQ(start_rot.getElem(i), vo.m_Rotation.getElem(i));
+        ASSERT_NEAR(start_rot.getElem(i), body_rot.getElem(i), 0.0000001f);
+    }
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_GT(start_pos.getY(), vo.m_Position.getY());
+    ASSERT_GT(start_pos.getY(), (*TestFixture::m_Test.m_GetWorldPositionFunc)(TestFixture::m_Context, dynamic_co).getY());
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, dynamic_co);
+
+    // Kinematic RB
+
+    vo.m_Position = Point3(0.0f, 0.0f, 0.0f);
+    vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+    data.m_Mass = 0.0f;
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    typename TypeParam::CollisionObjectType kinematic_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_EQ(0.0f, vo.m_Position.getY());
+    ASSERT_EQ(0.0f, (*TestFixture::m_Test.m_GetWorldPositionFunc)(TestFixture::m_Context, kinematic_co).getY());
+
+    vo.m_Position.setY(1.0f);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_EQ(1.0f, vo.m_Position.getY());
+    ASSERT_EQ(1.0f, (*TestFixture::m_Test.m_GetWorldPositionFunc)(TestFixture::m_Context, kinematic_co).getY());
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, kinematic_co);
+
+    // Static RB
+
+    vo.m_Position = Point3(0.0f, 0.0f, 0.0f);
+    vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    typename TypeParam::CollisionObjectType static_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_EQ(0.0f, vo.m_Position.getY());
+    ASSERT_EQ(0.0f, (*TestFixture::m_Test.m_GetWorldPositionFunc)(TestFixture::m_Context, static_co).getY());
+
+    vo.m_Position.setY(1.0f);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_EQ(1.0f, vo.m_Position.getY());
+    ASSERT_EQ(0.0f, (*TestFixture::m_Test.m_GetWorldPositionFunc)(TestFixture::m_Context, static_co).getY());
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, static_co);
+
+    // Trigger RB
+
+    vo.m_Position = Point3(0.0f, 0.0f, 0.0f);
+    vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER;
+    typename TypeParam::CollisionObjectType trigger_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_EQ(0.0f, vo.m_Position.getY());
+    ASSERT_EQ(0.0f, (*TestFixture::m_Test.m_GetWorldPositionFunc)(TestFixture::m_Context, trigger_co).getY());
+
+    vo.m_Position.setY(1.0f);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_EQ(1.0f, vo.m_Position.getY());
+    ASSERT_EQ(1.0f, (*TestFixture::m_Test.m_GetWorldPositionFunc)(TestFixture::m_Context, trigger_co).getY());
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, trigger_co);
+
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+#if defined(PHYSICS_TEST_BOX2D) || defined(PHYSICS_TEST_BOX2D_DEFOLD)
+TYPED_TEST(PhysicsTest, DynamicTransformUpdatesBodyPositionAndPreservesVelocity)
+{
+    /*
+     * Intent:
+     * Verify the Box2D dynamic-transform sync path used by StepWorld2D when
+     * physics.allow_dynamic_transforms is enabled. Updating the external game
+     * object transform should move the dynamic body without resetting velocity.
+     *
+     * Setup:
+     * Recreate the 2D physics world with m_AllowDynamicTransforms enabled,
+     * create one dynamic body backed by a VisualObject transform callback, set
+     * non-zero linear and angular velocities, then change the VisualObject
+     * position and rotation before stepping with dt = 0.
+     *
+     * Expected results:
+     * The body's Box2D transform is updated from the external transform, and
+     * both linear and angular velocity remain unchanged.
+     */
+    TestFixture::RecreateContextAndWorld(PHYSICS_SCALE, true);
+    TestFixture::m_StepWorldContext.m_DT = 0.0f;
+    const float POSITION_EPSILON = 0.000001f;
+    const float VELOCITY_EPSILON = 0.000001f;
+    const float ROTATION_EPSILON = 0.001f;
+
+    VisualObject vo;
+    vo.m_Position = Point3(1.0f, 2.0f, 0.0f);
+    vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+
+    dmPhysics::CollisionObjectData data;
+    data.m_UserData = &vo;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(0.5f, 0.5f, 0.5f));
+    typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    Vector3 linear_velocity(3.0f, -2.0f, 0.0f);
+    Vector3 angular_velocity(0.0f, 0.0f, 1.75f);
+    (*TestFixture::m_Test.m_SetLinearVelocityFunc)(TestFixture::m_Context, co, linear_velocity);
+    (*TestFixture::m_Test.m_SetAngularVelocityFunc)(TestFixture::m_Context, co, angular_velocity);
+
+    Point3 new_position(4.0f, 7.0f, 0.0f);
+    Quat new_rotation = Quat::rotationZ(0.5f);
+    vo.m_Position = new_position;
+    vo.m_Rotation = new_rotation;
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    Point3 body_position = (*TestFixture::m_Test.m_GetWorldPositionFunc)(TestFixture::m_Context, co);
+    for (int i = 0; i < 3; ++i)
+    {
+        ASSERT_NEAR(new_position.getElem(i), body_position.getElem(i), POSITION_EPSILON);
+        ASSERT_NEAR(new_position.getElem(i), vo.m_Position.getElem(i), POSITION_EPSILON);
+    }
+
+    Quat body_rotation = (*TestFixture::m_Test.m_GetWorldRotationFunc)(TestFixture::m_Context, co);
+    for (int i = 0; i < 4; ++i)
+    {
+        ASSERT_NEAR(new_rotation.getElem(i), body_rotation.getElem(i), ROTATION_EPSILON);
+        ASSERT_NEAR(new_rotation.getElem(i), vo.m_Rotation.getElem(i), ROTATION_EPSILON);
+    }
+
+    Vector3 body_linear_velocity = (*TestFixture::m_Test.m_GetLinearVelocityFunc)(TestFixture::m_Context, co);
+    Vector3 body_angular_velocity = (*TestFixture::m_Test.m_GetAngularVelocityFunc)(TestFixture::m_Context, co);
+    for (int i = 0; i < 3; ++i)
+    {
+        ASSERT_NEAR(linear_velocity.getElem(i), body_linear_velocity.getElem(i), VELOCITY_EPSILON);
+        ASSERT_NEAR(angular_velocity.getElem(i), body_angular_velocity.getElem(i), VELOCITY_EPSILON);
+    }
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, DynamicTransformSyncAllowsSleeping)
+{
+    /*
+     * Intent:
+     * Verify that repeated Box2D dynamic-transform sync wakes the body without
+     * disabling sleep. A dynamic body that is externally repositioned while it
+     * has no velocity should still be able to accumulate sleep time.
+     *
+     * Setup:
+     * Recreate the 2D physics world with m_AllowDynamicTransforms enabled,
+     * disable gravity, create one idle dynamic body backed by a VisualObject
+     * transform callback, then move the VisualObject by more than the sync
+     * epsilon before every step.
+     *
+     * Expected results:
+     * The body reaches a sleeping state within the sleep timeout even though the
+     * dynamic-transform sync path updated its Box2D transform every step.
+     */
+    TestFixture::RecreateContextAndWorld(PHYSICS_SCALE, true);
+    (*TestFixture::m_Test.m_SetGravityFunc)(TestFixture::m_World, Vector3(0.0f, 0.0f, 0.0f));
+
+    VisualObject vo;
+    vo.m_Position = Point3(0.0f, 0.0f, 0.0f);
+    vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+
+    dmPhysics::CollisionObjectData data;
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC;
+    data.m_UserData = &vo;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(0.5f, 0.5f, 0.5f));
+    typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+    ASSERT_FALSE((*TestFixture::m_Test.m_IsSleepingFunc)(co));
+
+    const float position_delta = 0.001f;
+    const float sleep_timeout = 2.1f;
+    int steps = (int)(sleep_timeout / TestFixture::m_StepWorldContext.m_DT);
+    bool slept = false;
+    for (int i = 0; i < steps; ++i)
+    {
+        vo.m_Position += Vector3(position_delta, 0.0f, 0.0f);
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+        if ((*TestFixture::m_Test.m_IsSleepingFunc)(co))
+        {
+            slept = true;
+            break;
+        }
+    }
+
+    ASSERT_TRUE(slept);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, DynamicTransformScaleNoiseDoesNotWakeSleepingBody)
+{
+    /*
+     * Intent:
+     * Verify that Box2D dynamic-transform scale sync wakes sleeping bodies only
+     * for meaningful scale changes. Tiny scale noise should not keep a sleeping
+     * body awake, but an actual scale update should wake it.
+     *
+     * Setup:
+     * Recreate the 2D physics world with m_AllowDynamicTransforms enabled,
+     * disable gravity, create one idle dynamic body backed by a VisualObject
+     * transform callback, and step until the body sleeps. Then apply sub-epsilon
+     * scale noise followed by a larger scale change.
+     *
+     * Expected results:
+     * The sleeping body remains asleep after the sub-epsilon scale change, and
+     * wakes when the scale changes by more than the scale epsilon.
+     */
+    TestFixture::RecreateContextAndWorld(PHYSICS_SCALE, true);
+    (*TestFixture::m_Test.m_SetGravityFunc)(TestFixture::m_World, Vector3(0.0f, 0.0f, 0.0f));
+
+    VisualObject vo;
+    vo.m_Position = Point3(0.0f, 0.0f, 0.0f);
+    vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+    vo.m_Scale = 1.0f;
+
+    dmPhysics::CollisionObjectData data;
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC;
+    data.m_UserData = &vo;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(0.5f, 0.5f, 0.5f));
+    typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+    ASSERT_FALSE((*TestFixture::m_Test.m_IsSleepingFunc)(co));
+
+    const float sleep_timeout = 2.1f;
+    int steps = (int)(sleep_timeout / TestFixture::m_StepWorldContext.m_DT);
+    for (int i = 0; i < steps; ++i)
+    {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+    ASSERT_TRUE((*TestFixture::m_Test.m_IsSleepingFunc)(co));
+
+    vo.m_Scale += 0.0000005f;
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_TRUE((*TestFixture::m_Test.m_IsSleepingFunc)(co));
+
+    vo.m_Scale += 0.001f;
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_FALSE((*TestFixture::m_Test.m_IsSleepingFunc)(co));
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, DynamicBodyOnGroundSleepsWithDynamicTransformSync)
+{
+    /*
+     * Intent:
+     * Verify that a normal dynamic body can come to rest and sleep while
+     * Box2D dynamic-transform sync is enabled.
+     *
+     * Setup:
+     * Recreate the 2D physics world with m_AllowDynamicTransforms enabled,
+     * create one static ground body and one dynamic box above it, then step the
+     * world long enough for the dynamic body to settle on the ground.
+     *
+     * Expected results:
+     * The dynamic body reaches Box2D's sleeping state.
+     */
+    TestFixture::RecreateContextAndWorld(PHYSICS_SCALE, true);
+
+    VisualObject ground_vo;
+    ground_vo.m_Position = Point3(0.0f, -1.0f, 0.0f);
+    ground_vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+
+    dmPhysics::CollisionObjectData ground_data;
+    ground_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    ground_data.m_Mass = 0.0f;
+    ground_data.m_UserData = &ground_vo;
+    typename TypeParam::CollisionShapeType ground_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(10.0f, 0.5f, 0.5f));
+    typename TypeParam::CollisionObjectType ground_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, ground_data, &ground_shape, 1u);
+
+    VisualObject box_vo;
+    box_vo.m_Position = Point3(0.0f, 2.0f, 0.0f);
+    box_vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+
+    dmPhysics::CollisionObjectData box_data;
+    box_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC;
+    box_data.m_UserData = &box_vo;
+    typename TypeParam::CollisionShapeType box_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(0.5f, 0.5f, 0.5f));
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, box_data, &box_shape, 1u);
+    ASSERT_FALSE((*TestFixture::m_Test.m_IsSleepingFunc)(box_co));
+
+    const float sleep_timeout = 4.0f;
+    int steps = (int)(sleep_timeout / TestFixture::m_StepWorldContext.m_DT);
+    bool slept = false;
+    for (int i = 0; i < steps; ++i)
+    {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+        if ((*TestFixture::m_Test.m_IsSleepingFunc)(box_co))
+        {
+            slept = true;
+            break;
+        }
+    }
+
+    ASSERT_TRUE(slept);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(box_shape);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, ground_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(ground_shape);
+}
+#endif
+
+TYPED_TEST(PhysicsTest, GroundBoxCollision)
+{
+    float ground_height_half_ext = 1.0f;
+    float box_half_ext = 0.5f;
+
+    VisualObject ground_visual_object;
+    dmPhysics::CollisionObjectData ground_data;
+    typename TypeParam::CollisionShapeType ground_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(100, ground_height_half_ext, 100));
+    ground_data.m_Mass = 0.0f;
+    ground_data.m_Restitution = 0.0f;
+    ground_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    ground_data.m_UserData = &ground_visual_object;
+    typename TypeParam::CollisionObjectType ground_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, ground_data, &ground_shape, 1u);
+
+    Point3 start_position(0.0f, 2.0f, 0.0f);
+    VisualObject box_visual_object;
+    box_visual_object.m_Position = start_position;
+    dmPhysics::CollisionObjectData box_data;
+    box_data.m_Restitution = 0.0f;
+    typename TypeParam::CollisionShapeType box_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    box_data.m_UserData = &box_visual_object;
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, box_data, &box_shape, 1u);
+
+    for (int i = 0; i < 200; ++i)
+    {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    ASSERT_NEAR(ground_height_half_ext + box_half_ext, box_visual_object.m_Position.getY(), 2.0f * TestFixture::m_Test.m_PolygonRadius / PHYSICS_SCALE);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, ground_co);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(ground_shape);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(box_shape);
+}
+
+TYPED_TEST(PhysicsTest, ShapeTransform)
+{
+    float ground_height_half_ext = 1.0f;
+    float box_half_ext = 0.5f;
+
+    VisualObject ground_visual_object;
+    dmPhysics::CollisionObjectData ground_data;
+    typename TypeParam::CollisionShapeType ground_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(100, ground_height_half_ext, 100));
+    ground_data.m_Mass = 0.0f;
+    ground_data.m_Restitution = 0.0f;
+    ground_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    ground_data.m_UserData = &ground_visual_object;
+    typename TypeParam::CollisionObjectType ground_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, ground_data, &ground_shape, 1u);
+
+    Point3 start_position(0.0f, 2.0f, 0.0f);
+    VisualObject box_visual_object;
+    box_visual_object.m_Position = start_position;
+    dmPhysics::CollisionObjectData box_data;
+    box_data.m_Restitution = 0.0f;
+    typename TypeParam::CollisionShapeType box_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    box_data.m_UserData = &box_visual_object;
+    Vector3 trans(0, 0, 0);
+    Quat rot = Quat::rotationZ((float) (0.25 * M_PI));
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc2)(TestFixture::m_World, box_data, &box_shape, &trans, &rot, 1u);
+
+    for (int i = 0; i < 200; ++i)
+    {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    ASSERT_NEAR(ground_height_half_ext + box_half_ext * sqrt(2.0f), box_visual_object.m_Position.getY(), 2.0f * TestFixture::m_Test.m_PolygonRadius / PHYSICS_SCALE);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, ground_co);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(ground_shape);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(box_shape);
+}
+
+TYPED_TEST(PhysicsTest, KinematicStaticCollision)
+{
+    float ground_height_half_ext = 1.0f;
+    float box_half_ext = 0.5f;
+
+    VisualObject ground_visual_object;
+    dmPhysics::CollisionObjectData ground_data;
+    typename TypeParam::CollisionShapeType ground_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(100, ground_height_half_ext, 100));
+    ground_data.m_Mass = 0.0f;
+    ground_data.m_Restitution = 0.0f;
+    ground_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    ground_data.m_UserData = &ground_visual_object;
+    typename TypeParam::CollisionObjectType ground_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, ground_data, &ground_shape, 1u);
+
+    Point3 start_position(0.0f, 2.0f, 0.0f);
+    VisualObject box_visual_object;
+    box_visual_object.m_Position = start_position;
+    dmPhysics::CollisionObjectData box_data;
+    box_data.m_Mass = 0.0f;
+    box_data.m_Restitution = 0.0f;
+    box_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    box_data.m_UserData = &box_visual_object;
+    typename TypeParam::CollisionShapeType box_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, box_data, &box_shape, 1u);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_EQ(0, TestFixture::m_CollisionCount);
+    ASSERT_EQ(0, TestFixture::m_ContactPointCount);
+
+    box_visual_object.m_Position.setY(1.0f);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_LT(0, TestFixture::m_CollisionCount);
+    ASSERT_LT(0, TestFixture::m_ContactPointCount);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, ground_co);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(ground_shape);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(box_shape);
+}
+
+TYPED_TEST(PhysicsTest, CollisionCallbacks)
+{
+    float ground_height_half_ext = 1.0f;
+    float box_half_ext = 0.5f;
+
+    VisualObject ground_visual_object;
+    dmPhysics::CollisionObjectData ground_data;
+    typename TypeParam::CollisionShapeType ground_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(100, ground_height_half_ext, 100));
+    ground_data.m_Mass = 0.0f;
+    ground_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    ground_data.m_UserData = &ground_visual_object;
+    typename TypeParam::CollisionObjectType ground_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, ground_data, &ground_shape, 1u);
+
+    VisualObject box_visual_object;
+    box_visual_object.m_Position = Point3(0, 10, 0);
+    dmPhysics::CollisionObjectData box_data;
+    typename TypeParam::CollisionShapeType box_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    box_data.m_UserData = &box_visual_object;
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, box_data, &box_shape, 1u);
+
+    box_visual_object.m_CollisionCount = 0;
+    ground_visual_object.m_CollisionCount = 0;
+    TestFixture::m_CollisionCount = 0;
+    TestFixture::m_ContactPointCount = 0;
+    for (int i = 0; i < 10; ++i)
+    {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+    ASSERT_EQ(0, TestFixture::m_CollisionCount);
+    ASSERT_EQ(0, TestFixture::m_ContactPointCount);
+
+    float last_y = 0.0f;
+    for (int i = 0; i < 200 && box_visual_object.m_Position.getY() != last_y; ++i)
+    {
+        last_y = box_visual_object.m_Position.getY();
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+    ASSERT_EQ(20, TestFixture::m_CollisionCount);
+    ASSERT_EQ(20, TestFixture::m_ContactPointCount);
+
+    ASSERT_LT(0, box_visual_object.m_CollisionCount);
+    ASSERT_LT(0, ground_visual_object.m_CollisionCount);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, ground_co);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(ground_shape);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(box_shape);
+}
+
+bool TriggerCollisionCallback(void* user_data_a, uint16_t group_a, void* user_data_b, uint16_t group_b, void* user_data)
+{
+    VisualObject* vo = (VisualObject*)user_data_a;
+    ++vo->m_CollisionCount;
+    if (vo->m_FirstCollisionGroup == 0)
+    {
+        vo->m_FirstCollisionGroup = group_b;
+    }
+    vo = (VisualObject*)user_data_b;
+    ++vo->m_CollisionCount;
+    if (vo->m_FirstCollisionGroup == 0)
+    {
+        vo->m_FirstCollisionGroup = group_a;
+    }
+    return true;
+}
+
+TYPED_TEST(PhysicsTest, TriggerCollisions)
+{
+    float box_half_ext = 0.5f;
+
+    // Test the test
+
+    VisualObject static_vo;
+    static_vo.m_Position = Point3(0.0f, 0.0f, 0.0f);
+    static_vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+    dmPhysics::CollisionObjectData static_data;
+    typename TypeParam::CollisionShapeType static_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    static_data.m_Mass = 0.0f;
+    static_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    static_data.m_UserData = &static_vo;
+    typename TypeParam::CollisionObjectType static_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, static_data, &static_shape, 1u);
+
+    VisualObject dynamic_vo;
+    dynamic_vo.m_Position = Point3(0.0f, 1.0f, 0.0f);
+    dynamic_vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+    dmPhysics::CollisionObjectData dynamic_data;
+    typename TypeParam::CollisionShapeType dynamic_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    dynamic_data.m_UserData = &dynamic_vo;
+    typename TypeParam::CollisionObjectType dynamic_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, dynamic_data, &dynamic_shape, 1u);
+
+    ASSERT_EQ(0u, dynamic_vo.m_FirstCollisionGroup);
+    ASSERT_EQ(0u, static_vo.m_FirstCollisionGroup);
+
+    for (int i = 0; i < 20; ++i)
+    {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    ASSERT_NEAR(1.0f, dynamic_vo.m_Position.getY(), 2.0f * TestFixture::m_Test.m_PolygonRadius / PHYSICS_SCALE);
+    ASSERT_EQ(0.0f, static_vo.m_Position.getY());
+    ASSERT_EQ(1u, dynamic_vo.m_FirstCollisionGroup);
+    ASSERT_EQ(1u, static_vo.m_FirstCollisionGroup);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, static_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(static_shape);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, dynamic_co);
+
+    // Test trigger collision: dynamic body moving into trigger
+
+    dynamic_vo.m_Position = Point3(0.0f, 1.1f, 0.0f);
+    dynamic_vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+    dynamic_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, dynamic_data, &dynamic_shape, 1u);
+
+    VisualObject trigger_vo;
+    trigger_vo.m_Position = Point3(0.0f, 0.0f, 0.0f);
+    trigger_vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+    dmPhysics::CollisionObjectData trigger_data;
+    typename TypeParam::CollisionShapeType trigger_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    trigger_data.m_Mass = 0.0f;
+    trigger_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER;
+    trigger_data.m_UserData = &trigger_vo;
+    typename TypeParam::CollisionObjectType trigger_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, trigger_data, &trigger_shape, 1u);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_EQ(0, trigger_vo.m_CollisionCount);
+    ASSERT_EQ(0u, trigger_vo.m_FirstCollisionGroup);
+
+    for (int i = 0; i < 20; ++i)
+    {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    ASSERT_GT(1.0f - 0.1f, dynamic_vo.m_Position.getY());
+    ASSERT_EQ(0.0f, trigger_vo.m_Position.getY());
+    ASSERT_LT(0, trigger_vo.m_CollisionCount);
+    ASSERT_EQ(1u, dynamic_vo.m_FirstCollisionGroup);
+    ASSERT_EQ(1u, trigger_vo.m_FirstCollisionGroup);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, dynamic_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(dynamic_shape);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, trigger_co);
+
+    // Test trigger collision: dynamic body moving into trigger
+
+    static_vo = VisualObject();
+    static_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    static_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, static_data, &static_shape, 1u);
+
+    trigger_vo.m_Position = Point3(0.0f, 1.1f, 0.0f);
+    trigger_vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+    trigger_vo.m_CollisionCount = 0;
+    trigger_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, trigger_data, &trigger_shape, 1u);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_EQ(0, trigger_vo.m_CollisionCount);
+
+    trigger_vo.m_Position.setY(0.8f);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_LT(0, trigger_vo.m_CollisionCount);
+
+    trigger_vo.m_CollisionCount = 0;
+
+    trigger_vo.m_Position.setY(1.1f);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_EQ(0, trigger_vo.m_CollisionCount);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, trigger_co);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, static_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(static_shape);
+
+    // Test trigger collision: kinematic body moved into trigger
+
+    VisualObject kinematic_vo;
+    kinematic_vo.m_Position = Point3(0.0f, 0.0f, 0.0f);
+    kinematic_vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+    kinematic_vo.m_CollisionCount = 0;
+    dmPhysics::CollisionObjectData kinematic_data;
+    typename TypeParam::CollisionShapeType kinematic_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    kinematic_data.m_Mass = 0.0f;
+    kinematic_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    kinematic_data.m_UserData = &kinematic_vo;
+    typename TypeParam::CollisionObjectType kinematic_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, kinematic_data, &kinematic_shape, 1u);
+
+    trigger_vo.m_Position = Point3(0.0f, 1.1f, 0.0f);
+    trigger_vo.m_Rotation = Quat(0.0f, 0.0f, 0.0f, 1.0f);
+    trigger_vo.m_CollisionCount = 0;
+    trigger_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, trigger_data, &trigger_shape, 1u);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_EQ(0, kinematic_vo.m_CollisionCount);
+    ASSERT_EQ(0, trigger_vo.m_CollisionCount);
+
+    kinematic_vo.m_Position.setY(0.5f);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_EQ(1, kinematic_vo.m_CollisionCount);
+    ASSERT_EQ(1, trigger_vo.m_CollisionCount);
+
+    kinematic_vo.m_CollisionCount = 0;
+    trigger_vo.m_CollisionCount = 0;
+
+    kinematic_vo.m_Position.setY(0.0f);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_EQ(0, kinematic_vo.m_CollisionCount);
+    ASSERT_EQ(0, trigger_vo.m_CollisionCount);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, kinematic_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(kinematic_shape);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, trigger_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(trigger_shape);
+}
+
+TYPED_TEST(PhysicsTest, ApplyForce)
+{
+    float box_half_ext = 0.5f;
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    Vector3 lin_vel = (*TestFixture::m_Test.m_GetLinearVelocityFunc)(TestFixture::m_Context, box_co);
+    ASSERT_EQ(0.0f, lengthSqr(lin_vel));
+    Vector3 ang_vel = (*TestFixture::m_Test.m_GetAngularVelocityFunc)(TestFixture::m_Context, box_co);
+    ASSERT_EQ(0.0f, lengthSqr(ang_vel));
+
+    Vector3 force(0.0f, 1.0f, 0.0f);
+    (*TestFixture::m_Test.m_ApplyForceFunc)(TestFixture::m_Context, box_co, force, Point3(0.5f*box_half_ext, 0.0f, 0.0f));
+    Vector3 total_force = (*TestFixture::m_Test.m_GetTotalForceFunc)(TestFixture::m_Context, box_co);
+    ASSERT_NEAR(total_force.getX(), force.getX(), 0.01f);
+    ASSERT_NEAR(total_force.getY(), force.getY(), 0.01f);
+    ASSERT_NEAR(total_force.getZ(), force.getZ(), 0.01f);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    lin_vel = (*TestFixture::m_Test.m_GetLinearVelocityFunc)(TestFixture::m_Context, box_co);
+    ASSERT_NE(0.0f, lengthSqr(lin_vel));
+    ang_vel = (*TestFixture::m_Test.m_GetAngularVelocityFunc)(TestFixture::m_Context, box_co);
+    ASSERT_NE(0.0f, lengthSqr(ang_vel));
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, SetVelocity)
+{
+    float box_half_ext = 0.5f;
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    Vector3 lin_vel = (*TestFixture::m_Test.m_GetLinearVelocityFunc)(TestFixture::m_Context, box_co);
+    ASSERT_EQ(0.0f, lengthSqr(lin_vel));
+    Vector3 ang_vel = (*TestFixture::m_Test.m_GetAngularVelocityFunc)(TestFixture::m_Context, box_co);
+    ASSERT_EQ(0.0f, lengthSqr(ang_vel));
+
+    lin_vel = Vector3(1,0,0);
+    (*TestFixture::m_Test.m_SetLinearVelocityFunc)(TestFixture::m_Context, box_co, lin_vel);
+    lin_vel = (*TestFixture::m_Test.m_GetLinearVelocityFunc)(TestFixture::m_Context, box_co);
+    ASSERT_EQ(1.0f, lengthSqr(lin_vel));
+
+    ang_vel = Vector3(0,0,2);
+    (*TestFixture::m_Test.m_SetAngularVelocityFunc)(TestFixture::m_Context, box_co, ang_vel);
+    ang_vel = (*TestFixture::m_Test.m_GetAngularVelocityFunc)(TestFixture::m_Context, box_co);
+    ASSERT_EQ(4.0f, lengthSqr(ang_vel));
+
+    ///////////////////////////////////////////////////////////////////////
+    // For the 3D physics engine to reset the local time
+    float old_dt = TestFixture::m_StepWorldContext.m_DT;
+    bool use_fixed_time_step = TestFixture::m_StepWorldContext.m_FixedTimeStep;
+    uint32_t max_fixed_timesteps = TestFixture::m_StepWorldContext.m_MaxFixedTimeSteps;
+    TestFixture::m_StepWorldContext.m_DT = 0;
+    TestFixture::m_StepWorldContext.m_FixedTimeStep = 0;
+    TestFixture::m_StepWorldContext.m_MaxFixedTimeSteps = 0;
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    TestFixture::m_StepWorldContext.m_DT = old_dt;
+    TestFixture::m_StepWorldContext.m_MaxFixedTimeSteps = max_fixed_timesteps;
+    TestFixture::m_StepWorldContext.m_FixedTimeStep = use_fixed_time_step;
+    ///////////////////////////////////////////////////////////////////////
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    lin_vel = (*TestFixture::m_Test.m_GetLinearVelocityFunc)(TestFixture::m_Context, box_co);
+
+    ASSERT_NEAR(1.0f, lengthSqr(lin_vel), 0.05f);
+    ang_vel = (*TestFixture::m_Test.m_GetAngularVelocityFunc)(TestFixture::m_Context, box_co);
+    ASSERT_NEAR(4.0f, lengthSqr(ang_vel), 0.05f);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, EnableDisable)
+{
+    // Dynamic object
+
+    VisualObject vo;
+
+    float box_half_ext = 0.5f;
+    dmPhysics::CollisionObjectData data;
+    data.m_UserData = &vo;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_TRUE((*TestFixture::m_Test.m_IsEnabledFunc)(box_co));
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    (*TestFixture::m_Test.m_SetEnabledFunc)(TestFixture::m_World, box_co, true);
+
+    Point3 p = (*TestFixture::m_Test.m_GetWorldPositionFunc)(TestFixture::m_Context, box_co);
+    ASSERT_NE(0.0f, lengthSqr(Vector3(p)));
+
+    Vector3 lin_vel = (*TestFixture::m_Test.m_GetLinearVelocityFunc)(TestFixture::m_Context, box_co);
+    ASSERT_NE(0.0f, lengthSqr(lin_vel));
+
+    (*TestFixture::m_Test.m_SetEnabledFunc)(TestFixture::m_World, box_co, false);
+    ASSERT_FALSE((*TestFixture::m_Test.m_IsEnabledFunc)(box_co));
+
+    vo.m_Position = Point3(0.0f, 0.0f, 0.0f);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    (*TestFixture::m_Test.m_SetEnabledFunc)(TestFixture::m_World, box_co, true);
+    ASSERT_TRUE((*TestFixture::m_Test.m_IsEnabledFunc)(box_co));
+
+    p = (*TestFixture::m_Test.m_GetWorldPositionFunc)(TestFixture::m_Context, box_co);
+    ASSERT_EQ(0.0f, lengthSqr(Vector3(p)));
+
+    lin_vel = (*TestFixture::m_Test.m_GetLinearVelocityFunc)(TestFixture::m_Context, box_co);
+    ASSERT_EQ(0.0f, lengthSqr(lin_vel));
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+/**
+ * Tests that all different types of collision objects have an expected collision response when enabled/disable.
+ */
+TYPED_TEST(PhysicsTest, EnableDisableCollisions)
+{
+    float radius = 0.5f;
+
+    struct CollisionPair
+    {
+        dmPhysics::CollisionObjectType  m_TypeA;
+        dmPhysics::CollisionObjectType  m_TypeB;
+    };
+
+    // Tests everything except trigger => trigger and static => static
+    CollisionPair pairs[] =
+    {
+            {dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER, dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC},
+            {dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER, dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC},
+            {dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER, dmPhysics::COLLISION_OBJECT_TYPE_STATIC},
+            {dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC, dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC},
+            {dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC, dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER},
+            {dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC, dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC},
+            {dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC, dmPhysics::COLLISION_OBJECT_TYPE_STATIC},
+            {dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC, dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC},
+            {dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC, dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER},
+            {dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC, dmPhysics::COLLISION_OBJECT_TYPE_STATIC},
+            {dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC, dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC},
+            {dmPhysics::COLLISION_OBJECT_TYPE_STATIC, dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC},
+            {dmPhysics::COLLISION_OBJECT_TYPE_STATIC, dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC},
+            {dmPhysics::COLLISION_OBJECT_TYPE_STATIC, dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER}
+    };
+    uint32_t count = sizeof(pairs)/sizeof(CollisionPair);
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        CollisionPair& pair = pairs[i];
+        VisualObject vo_a;
+        dmPhysics::CollisionObjectData data_a;
+        data_a.m_Group = 1;
+        data_a.m_Mask = 2;
+        data_a.m_Type = pair.m_TypeA;
+        if (pair.m_TypeA == dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC)
+            data_a.m_Mass = 1.0f;
+        else
+            data_a.m_Mass = 0.0f;
+        data_a.m_UserData = &vo_a;
+        typename TypeParam::CollisionShapeType shape_a = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+        typename TypeParam::CollisionObjectType co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, &shape_a, 1u);
+
+        VisualObject vo_b;
+        vo_b.m_Position.setX(0.5f);
+        dmPhysics::CollisionObjectData data_b;
+        data_b.m_Group = 2;
+        data_b.m_Mask = 1;
+        data_b.m_Type = pair.m_TypeB;
+        if (pair.m_TypeB == dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC)
+            data_b.m_Mass = 1.0f;
+        else
+            data_b.m_Mass = 0.0f;
+        data_b.m_UserData = &vo_b;
+        typename TypeParam::CollisionShapeType shape_b = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+        typename TypeParam::CollisionObjectType co_b = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_b, &shape_b, 1u);
+
+        TestFixture::m_CollisionCount = 0;
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+        ASSERT_NE(0, TestFixture::m_CollisionCount);
+
+        TestFixture::m_CollisionCount = 0;
+        (*TestFixture::m_Test.m_SetEnabledFunc)(TestFixture::m_World, co_a, false);
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+        ASSERT_EQ(0, TestFixture::m_CollisionCount);
+
+        (*TestFixture::m_Test.m_SetEnabledFunc)(TestFixture::m_World, co_a, true);
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+        ASSERT_NE(0, TestFixture::m_CollisionCount);
+
+        (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co_a);
+        (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_a);
+        (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co_b);
+        (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_b);
+    }
+}
+
+struct RayCastResult
+{
+    dmPhysics::RayCastResponse m_Response;
+    void* m_UserData;
+};
+
+void RayCastCallback(const dmPhysics::RayCastResponse& response, const dmPhysics::RayCastRequest& request, void* user_data)
+{
+    RayCastResult* rcr = (RayCastResult*)request.m_UserData;
+    rcr[request.m_UserId].m_Response = response;
+    rcr[request.m_UserId].m_UserData = request.m_UserData;
+}
+
+TYPED_TEST(PhysicsTest, EmptyRayCasting)
+{
+    RayCastResult result;
+    memset(&result, 0, sizeof(RayCastResult));
+    // Avoid false positives
+    result.m_Response.m_Hit = true;
+
+    dmPhysics::RayCastRequest request;
+    request.m_From = Point3(0.0f, 1.0f, 0.0f);
+    request.m_To = Point3(0.0f, 1.0f, 0.0f);
+    request.m_UserId = 0;
+    request.m_UserData = &result;
+
+    (*TestFixture::m_Test.m_RequestRayCastFunc)(TestFixture::m_World, request);
+
+    TestFixture::m_StepWorldContext.m_RayCastCallback = RayCastCallback;
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    // Check that the result was not handled
+    ASSERT_EQ(0u, result.m_UserData);
+}
+
+TYPED_TEST(PhysicsPrecisionRoundingTest, ZeroLengthRayCasting)
+{
+    dmArray<dmPhysics::RayCastResponse> hits;
+    hits.SetCapacity(8);
+
+    dmPhysics::RayCastRequest request;
+    request.m_UserId = 0;
+    request.m_Mask = 1;
+
+    // A zero length raycast from inputs
+    hits.SetSize(0);
+    request.m_From = Point3(0.0f, -13200000.0f, 0.0f);
+    request.m_To = Point3(0.0f, -13200000.0f, 0.0f);
+    request.m_ReturnAllResults = 0;
+    (*TestFixture::m_Test.m_RayCastFunc)(TestFixture::m_World, request, hits);
+
+    ASSERT_EQ(0u, hits.Size());
+
+    // A zero length raycast after applying scale
+    hits.SetSize(0);
+    request.m_From = Point3(0.0f, -13200000.0f, 0.0f);
+    request.m_To = Point3(0.0f, -13200001.0f, 0.0f);
+    request.m_ReturnAllResults = 0;
+    (*TestFixture::m_Test.m_RayCastFunc)(TestFixture::m_World, request, hits);
+
+    ASSERT_EQ(0u, hits.Size());
+}
+
+TYPED_TEST(PhysicsTest, RayCasting)
+{
+    float box_half_ext = 0.5f;
+    VisualObject vo;
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    data.m_Mass = 0.0f;
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data.m_UserData = &vo;
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    RayCastResult result[2];
+    memset(result, 0, sizeof(RayCastResult) * 2);
+
+    dmPhysics::RayCastRequest request;
+    request.m_From = Point3(0.0f, 1.0f, 0.0f);
+    request.m_To = Point3(0.0f, 0.51f + TestFixture::m_Test.m_PolygonRadius, 0.0f);
+    request.m_UserId = 0;
+    request.m_UserData = result;
+
+    (*TestFixture::m_Test.m_RequestRayCastFunc)(TestFixture::m_World, request);
+
+    request.m_To = Point3(0.0f, 0.49f, 0.0f);
+    request.m_UserId = 1;
+
+    (*TestFixture::m_Test.m_RequestRayCastFunc)(TestFixture::m_World, request);
+
+    TestFixture::m_StepWorldContext.m_RayCastCallback = RayCastCallback;
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+
+    ASSERT_FALSE(result[0].m_Response.m_Hit);
+    ASSERT_TRUE(result[1].m_Response.m_Hit);
+    ASSERT_GT(1.0f, result[1].m_Response.m_Fraction);
+    ASSERT_NEAR(0.0f, result[1].m_Response.m_Position.getX(), 0.00001f);
+    ASSERT_NEAR(0.5f, result[1].m_Response.m_Position.getY(), 0.00001f);
+    ASSERT_NEAR(0.0f, result[1].m_Response.m_Position.getZ(), 0.00001f);
+    ASSERT_NEAR(0.0f, result[1].m_Response.m_Normal.getX(), 0.00001f);
+    ASSERT_NEAR(1.0f, result[1].m_Response.m_Normal.getY(), 0.00001f);
+    ASSERT_NEAR(0.0f, result[1].m_Response.m_Normal.getZ(), 0.00001f);
+    ASSERT_EQ((void*)&vo, (void*)result[1].m_Response.m_CollisionObjectUserData);
+    ASSERT_EQ(1, result[1].m_Response.m_CollisionObjectGroup);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, InsideRayCasting)
+{
+    float box_half_ext = 0.5f;
+    VisualObject vo;
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    data.m_Mass = 0.0f;
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data.m_UserData = &vo;
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    RayCastResult result[2];
+    memset(result, 0, sizeof(result));
+
+    dmPhysics::RayCastRequest request;
+    request.m_From = Point3(0.0f, 0.0f, 0.0f);
+    request.m_To = Point3(0.0f, 1.0f, 0.0f);
+    request.m_UserId = 0;
+    request.m_UserData = result;
+
+    (*TestFixture::m_Test.m_RequestRayCastFunc)(TestFixture::m_World, request);
+
+    request.m_To = Point3(0.0f, 0.49f, 0.0f);
+    request.m_UserId = 1;
+
+    (*TestFixture::m_Test.m_RequestRayCastFunc)(TestFixture::m_World, request);
+
+    TestFixture::m_StepWorldContext.m_RayCastCallback = RayCastCallback;
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_FALSE(result[0].m_Response.m_Hit);
+    ASSERT_FALSE(result[1].m_Response.m_Hit);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, IgnoreRayCasting)
+{
+    float box_half_ext = 0.5f;
+    VisualObject vo;
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    data.m_Mass = 0.0f;
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data.m_UserData = &vo;
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    RayCastResult result;
+    memset(&result, 0, sizeof(RayCastResult));
+
+    dmPhysics::RayCastRequest request;
+    request.m_From = Point3(0.0f, 1.0f, 0.0f);
+    request.m_To = Point3(0.0f, 0.0f, 0.0f);
+    request.m_UserId = 0;
+    request.m_IgnoredUserData = &vo;
+    request.m_UserData = &result;
+
+    (*TestFixture::m_Test.m_RequestRayCastFunc)(TestFixture::m_World, request);
+
+    TestFixture::m_StepWorldContext.m_RayCastCallback = RayCastCallback;
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_FALSE(result.m_Response.m_Hit);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, TriggerRayCasting)
+{
+    float box_half_ext = 0.5f;
+    VisualObject vo;
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    data.m_Mass = 0.0f;
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER;
+    data.m_UserData = &vo;
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    RayCastResult result;
+    memset(&result, 0, sizeof(RayCastResult));
+
+    dmPhysics::RayCastRequest request;
+    request.m_From = Point3(0.0f, 1.0f, 0.0f);
+    request.m_To = Point3(0.0f, 0.0f, 0.0f);
+    request.m_UserId = 0;
+    request.m_UserData = &result;
+
+    (*TestFixture::m_Test.m_RequestRayCastFunc)(TestFixture::m_World, request);
+
+    TestFixture::m_StepWorldContext.m_RayCastCallback = RayCastCallback;
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    // We rather have a 0.0f hit here, but bullet thinks otherwise
+    ASSERT_FALSE(result.m_Response.m_Hit);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+TYPED_TEST(PhysicsTest, SynchronousRayCasting)
+{
+    float box_half_ext = 0.5f;
+
+    VisualObject vo_a;
+    //vo_a.m_Position = EngineToPhysicsWorld<T>(Point3(0.5f, 0.0, 0.0));
+    vo_a.m_Position.setX(1.0f);
+
+    VisualObject vo_b;
+    vo_b.m_Position.setX(2.5f);
+
+    VisualObject vo_c;
+    vo_c.m_Position.setX(4.0f);
+
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+
+    dmPhysics::CollisionObjectData data_a;
+    data_a.m_Group = 1;
+    data_a.m_Mass = 0.0f;
+    data_a.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data_a.m_UserData = &vo_a;
+    typename TypeParam::CollisionObjectType box_co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, &shape, 1u);
+
+    dmPhysics::CollisionObjectData data_b;
+    data_b.m_Group = 2;
+    data_b.m_Mass = 0.0f;
+    data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data_b.m_UserData = &vo_b;
+    typename TypeParam::CollisionObjectType box_co_b = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_b, &shape, 1u);
+
+    dmPhysics::CollisionObjectData data_c;
+    data_c.m_Group = 1;
+    data_c.m_Mass = 0.0f;
+    data_c.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data_c.m_UserData = &vo_c;
+    typename TypeParam::CollisionObjectType box_co_c = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_c, &shape, 1u);
+
+    dmArray<dmPhysics::RayCastResponse> hits;
+    hits.SetCapacity(8);
+
+    dmPhysics::RayCastRequest request;
+    request.m_UserId = 0;
+    request.m_Mask = 1;
+
+    // A miss
+    hits.SetSize(0);
+    request.m_From = Point3(-1.0f, 0.0f, 0.0f);
+    request.m_To = Point3(0.0f, 0.0f, 0.0f);
+    request.m_ReturnAllResults = 0;
+    (*TestFixture::m_Test.m_RayCastFunc)(TestFixture::m_World, request, hits);
+
+    ASSERT_EQ(0u, hits.Size());
+
+    // A hit
+    hits.SetSize(0);
+    request.m_From = Point3(-1.0f, 0.0f, 0.0f);
+    request.m_To = Point3(5.0f, 0.0f, 0.0f);
+    request.m_ReturnAllResults = 0;
+    (*TestFixture::m_Test.m_RayCastFunc)(TestFixture::m_World, request, hits);
+
+    ASSERT_EQ(1u, hits.Size());
+    ASSERT_EQ(0.25f, hits[0].m_Fraction);
+
+    // Two hits (the middle object has the wrong group)
+    hits.SetSize(0);
+    request.m_From = Point3(-1.0f, 0.0f, 0.0f);
+    request.m_To = Point3(5.0f, 0.0f, 0.0f);
+    request.m_ReturnAllResults = 1;
+    (*TestFixture::m_Test.m_RayCastFunc)(TestFixture::m_World, request, hits);
+
+    ASSERT_EQ(2u, hits.Size());
+    ASSERT_EQ(0.25f, hits[0].m_Fraction);
+    ASSERT_EQ(0.75f, hits[1].m_Fraction);
+    ASSERT_EQ(0.5f, hits[0].m_Position.getX());
+    ASSERT_EQ(3.5f, hits[1].m_Position.getX());
+
+    //
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_a);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_b);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_c);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+enum Groups
+{
+    GROUP_A = 1 << 0,
+    GROUP_B = 1 << 1
+};
+
+TYPED_TEST(PhysicsTest, FilteredRayCasting)
+{
+    float box_half_ext = 0.5f;
+
+    VisualObject vo_a;
+    dmPhysics::CollisionObjectData data_a;
+    typename TypeParam::CollisionShapeType shape_a = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    data_a.m_Mass = 0.0f;
+    data_a.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data_a.m_Group = GROUP_A;
+    data_a.m_Mask = GROUP_A;
+    data_a.m_UserData = &vo_a;
+    typename TypeParam::CollisionObjectType box_co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, &shape_a, 1u);
+
+    VisualObject vo_b;
+    vo_b.m_Position.setY(-1.0f);
+    dmPhysics::CollisionObjectData data_b;
+    typename TypeParam::CollisionShapeType shape_b = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    data_b.m_Mass = 0.0f;
+    data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data_b.m_Group = GROUP_B;
+    data_b.m_Mask = GROUP_B;
+    data_b.m_UserData = &vo_b;
+    typename TypeParam::CollisionObjectType box_co_b = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_b, &shape_b, 1u);
+
+    RayCastResult result;
+    memset(&result, 0, sizeof(RayCastResult));
+
+    dmPhysics::RayCastRequest request;
+    request.m_From = Point3(0.0f, 1.0f, 0.0f);
+    request.m_To = Point3(0.0f, -1.0f, 0.0f);
+    request.m_UserId = 0;
+    request.m_UserData = &result;
+    request.m_Mask = GROUP_B;
+
+    (*TestFixture::m_Test.m_RequestRayCastFunc)(TestFixture::m_World, request);
+
+    TestFixture::m_StepWorldContext.m_RayCastCallback = RayCastCallback;
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_TRUE(result.m_Response.m_Hit);
+    ASSERT_EQ(GROUP_B, result.m_Response.m_CollisionObjectGroup);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_a);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_a);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_b);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_b);
+}
+
+TYPED_TEST(PhysicsTest, GravityChange)
+{
+    float box_half_ext = 0.5f;
+
+    ///////////////////////////////////////////////////////////////////////
+    // For the 3D physics engine to reset the local time
+    float old_dt = TestFixture::m_StepWorldContext.m_DT;
+    bool use_fixed_time_step = TestFixture::m_StepWorldContext.m_FixedTimeStep;
+    uint32_t max_fixed_timesteps = TestFixture::m_StepWorldContext.m_MaxFixedTimeSteps;
+    TestFixture::m_StepWorldContext.m_DT = 0;
+    TestFixture::m_StepWorldContext.m_FixedTimeStep = 0;
+    TestFixture::m_StepWorldContext.m_MaxFixedTimeSteps = 0;
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    TestFixture::m_StepWorldContext.m_DT = old_dt;
+    TestFixture::m_StepWorldContext.m_MaxFixedTimeSteps = max_fixed_timesteps;
+    TestFixture::m_StepWorldContext.m_FixedTimeStep = use_fixed_time_step;
+    ///////////////////////////////////////////////////////////////////////
+
+
+    // Verify that we get the defualt gravity.
+    Vector3 gravity = (*TestFixture::m_Test.m_GetGravityFunc)(TestFixture::m_World);
+    ASSERT_NEAR(0.0f, gravity.getX(), FLT_EPSILON);
+    ASSERT_NEAR(-10.0f, gravity.getY(), FLT_EPSILON);
+    ASSERT_NEAR(0.0f, gravity.getZ(), FLT_EPSILON);
+
+    VisualObject vo;
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    data.m_Group = GROUP_A;
+    data.m_Mask = GROUP_A;
+    data.m_UserData = &vo;
+    data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC;
+    data.m_Mass = 1.0f;
+    data.m_Restitution = 1.0f;
+    typename TypeParam::CollisionObjectType box_co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+    (void)box_co_a;
+
+    // Verify that the default gravity is applied.
+    const int steps = 10;
+    float y = vo.m_Position.getY();
+    for (int i = 0; i < steps; ++i) {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+        ASSERT_GT(y, vo.m_Position.getY());
+    }
+
+    // Reverse Y gravity and make sure we get the same gravity from the physics sys.
+    gravity.setY(-gravity.getY());
+    (*TestFixture::m_Test.m_SetGravityFunc)(TestFixture::m_World, gravity);
+    gravity = (*TestFixture::m_Test.m_GetGravityFunc)(TestFixture::m_World);
+    ASSERT_NEAR(0.0f, gravity.getX(), FLT_EPSILON);
+    ASSERT_NEAR(10.0f, gravity.getY(), FLT_EPSILON);
+    ASSERT_NEAR(0.0f, gravity.getZ(), FLT_EPSILON);
+
+    // Get the current position, and run the simulation steps*2 (twice to give the
+    // object enough time to slow down and reverse direction).
+    y = vo.m_Position.getY();
+    for (int i = 0; i < steps*2; ++i) {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    // Verify that the gravity has affected the y position in the opposite direction.
+    ASSERT_LT(y, vo.m_Position.getY());
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_a);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+enum FilterGroup
+{
+    FILTER_GROUP_A,
+    FILTER_GROUP_B,
+    FILTER_GROUP_C,
+    FILTER_GROUP_COUNT
+};
+
+bool FilterCollisionCallback(void* user_data_a, uint16_t group_a, void* user_data_b, uint16_t group_b, void* user_data)
+{
+    VisualObject* vo_a = (VisualObject*)user_data_a;
+    ++vo_a->m_CollisionCount;
+    VisualObject* vo_b = (VisualObject*)user_data_b;
+    ++vo_b->m_CollisionCount;
+    int* collision_count = (int*)user_data;
+    int index_a = 0;
+    int index_b = 0;
+    int mask = 1;
+    for (int i = 0; i < FILTER_GROUP_COUNT; ++i)
+    {
+        if (mask == group_a)
+            index_a = i;
+        if (mask == group_b)
+            index_b = i;
+        mask <<= 1;
+    }
+    collision_count[index_a] += 1;
+    collision_count[index_b] += 1;
+    return true;
+}
+
+bool FilterContactPointCallback(const dmPhysics::ContactPoint& contact_point, void* user_data)
+{
+    int* count = (int*)user_data;
+    int index_a = 0;
+    int index_b = 0;
+    int mask = 1;
+    for (int i = 0; i < FILTER_GROUP_COUNT; ++i)
+    {
+        if (mask == contact_point.m_GroupA)
+            index_a = i;
+        if (mask == contact_point.m_GroupB)
+            index_b = i;
+        mask <<= 1;
+    }
+    count[index_a] += 1;
+    count[index_b] += 1;
+    return true;
+}
+
+TYPED_TEST(PhysicsTest, CollisionFiltering)
+{
+    float box_half_ext = 0.5f;
+
+    VisualObject vo_a;
+    vo_a.m_Position.setY(1.1f);
+    dmPhysics::CollisionObjectData data_a;
+    typename TypeParam::CollisionShapeType shape_a = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    data_a.m_Group = 1 << FILTER_GROUP_A;
+    data_a.m_Mask = 1 << FILTER_GROUP_B;
+    data_a.m_UserData = &vo_a;
+    typename TypeParam::CollisionObjectType box_co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, &shape_a, 1u);
+
+    VisualObject vo_b;
+    vo_b.m_Position.setX(-0.6f);
+    dmPhysics::CollisionObjectData data_b;
+    typename TypeParam::CollisionShapeType shape_b = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    data_b.m_Group = 1 << FILTER_GROUP_B;
+    data_b.m_Mask = 1 << FILTER_GROUP_A;
+    data_b.m_Mass = 0.0f;
+    data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    data_b.m_UserData = &vo_b;
+    typename TypeParam::CollisionObjectType box_co_b = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_b, &shape_b, 1u);
+
+    VisualObject vo_c;
+    vo_c.m_Position.setX(0.6f);
+    dmPhysics::CollisionObjectData data_c;
+    typename TypeParam::CollisionShapeType shape_c = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    data_c.m_Group = 1 << FILTER_GROUP_C;
+    data_c.m_Mask = 1 << FILTER_GROUP_C;
+    data_c.m_Mass = 0.0f;
+    data_c.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    data_c.m_UserData = &vo_c;
+    typename TypeParam::CollisionObjectType box_co_c = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_c, &shape_c, 1u);
+
+    int collision_count[FILTER_GROUP_COUNT];
+    memset(collision_count, 0, FILTER_GROUP_COUNT * sizeof(int));
+    int contact_point_count[FILTER_GROUP_COUNT];
+    memset(contact_point_count, 0, FILTER_GROUP_COUNT * sizeof(int));
+
+    TestFixture::m_StepWorldContext.m_CollisionCallback = FilterCollisionCallback;
+    TestFixture::m_StepWorldContext.m_CollisionUserData = collision_count;
+    TestFixture::m_StepWorldContext.m_ContactPointCallback = FilterContactPointCallback;
+    TestFixture::m_StepWorldContext.m_ContactPointUserData = contact_point_count;
+    for (int i = 0; i < 10; ++i)
+    {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    ASSERT_EQ(collision_count[FILTER_GROUP_A] + collision_count[FILTER_GROUP_B], vo_a.m_CollisionCount + vo_b.m_CollisionCount);
+    ASSERT_EQ(0, vo_c.m_CollisionCount);
+    ASSERT_EQ(collision_count[FILTER_GROUP_C], vo_c.m_CollisionCount);
+
+    ASSERT_EQ(contact_point_count[FILTER_GROUP_A], contact_point_count[FILTER_GROUP_B]);
+    ASSERT_EQ(0, contact_point_count[FILTER_GROUP_C]);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_a);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_a);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_b);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_b);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_c);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_c);
+}
+
+TYPED_TEST(PhysicsTest, ReplaceShapes)
+{
+    float size = 0.5f;
+    typename TypeParam::CollisionShapeType shape1 = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(size, size, size));
+    typename TypeParam::CollisionShapeType dummy = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(size, size, size));
+    typename TypeParam::CollisionShapeType shape2 = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, size);
+    dmPhysics::CollisionObjectData data_a;
+    typename TypeParam::CollisionShapeType shapes[] = {shape1, dummy};
+    typename TypeParam::CollisionObjectType box_co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, shapes, 2u);
+    uint32_t n = (*TestFixture::m_Test.m_GetCollisionShapesFunc)(box_co_a, shapes, 2);
+    ASSERT_EQ(2u, n);
+
+    // NOTE: The assertions below is only possible for the 3d implementation
+    // In Box2D we create copies of shapes in order to support local transformation
+    if (TestFixture::m_Test.m_Is3D)
+    {
+        ASSERT_TRUE(shape1 == shapes[0] || shape1 == shapes[1]);
+    }
+    (*TestFixture::m_Test.m_ReplaceShapeFunc)(TestFixture::m_Context, shape1, shape2);
+    n = (*TestFixture::m_Test.m_GetCollisionShapesFunc)(box_co_a, shapes, 2);
+    ASSERT_EQ(2u, n);
+    // See comment in if-clause above
+    if (TestFixture::m_Test.m_Is3D)
+    {
+        ASSERT_TRUE(shape2 == shapes[0] || shape2 == shapes[1]);
+    }
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_a);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape1);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape2);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(dummy);
+}
+
+#if defined(PHYSICS_TEST_BULLET_3D)
+static int CountBulletContactPoints(dmPhysics::HWorld3D world)
+{
+    btDispatcher* dispatcher = world->m_DynamicsWorld->getDispatcher();
+    int contact_count = 0;
+    for (int i = 0; i < dispatcher->getNumManifolds(); ++i)
+    {
+        contact_count += dispatcher->getManifoldByIndexInternal(i)->getNumContacts();
+    }
+    return contact_count;
+}
+
+TYPED_TEST(PhysicsTest, RefreshCollisionShapeInvalidatesContacts)
+{
+    /* Intent: verify that replacing a compound child shape invalidates cached
+    ** Bullet contact algorithms even when the broadphase pair remains overlapping.
+    ** Setup: a distant child keeps the compound AABB overlapping another sphere
+    ** while the contacting child shrinks enough to remove the actual collision.
+    ** Expected: refreshing the shape removes every old contact point immediately.
+    ** Why: otherwise collision callbacks can report contacts produced by the
+    ** replaced child geometry until the broadphase pair happens to be rebuilt.
+    */
+    VisualObject object_a_visual;
+    dmPhysics::CollisionObjectData object_a_data;
+    object_a_data.m_UserData = &object_a_visual;
+    // Keep the compound AABB overlapping object B after the sphere shrinks so
+    // the existing broadphase pair must be reused with a fresh child algorithm.
+    typename TypeParam::CollisionShapeType large_sphere = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, 1.2f);
+    typename TypeParam::CollisionShapeType distant_box = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(1.0f, 1.0f, 1.0f));
+    typename TypeParam::CollisionShapeType object_a_shapes[] = {large_sphere, distant_box};
+    Vector3 object_a_translations[] = {Vector3(0.0f, 0.0f, 0.0f), Vector3(10.0f, 0.0f, 0.0f)};
+    Quat object_a_rotations[] = {Quat::identity(), Quat::identity()};
+    typename TypeParam::CollisionObjectType object_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc2)(TestFixture::m_World, object_a_data, object_a_shapes, object_a_translations, object_a_rotations, 2u);
+
+    VisualObject object_b_visual;
+    object_b_visual.m_Position = Point3(1.5f, 1.5f, 0.0f);
+    dmPhysics::CollisionObjectData object_b_data;
+    object_b_data.m_UserData = &object_b_visual;
+    object_b_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    object_b_data.m_Mass = 0.0f;
+    typename TypeParam::CollisionShapeType object_b_shape = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, 1.0f);
+    typename TypeParam::CollisionObjectType object_b = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, object_b_data, &object_b_shape, 1u);
+
+    TestFixture::m_World->m_DynamicsWorld->performDiscreteCollisionDetection();
+    ASSERT_LT(0, CountBulletContactPoints(TestFixture::m_World));
+
+    typename TypeParam::CollisionShapeType small_sphere = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, 1.0f);
+    ASSERT_TRUE(dmPhysics::ReplaceCollisionShapeAtIndex3D(object_a, 0, small_sphere));
+    dmPhysics::RefreshCollisionShape3D(TestFixture::m_World, object_a);
+    TestFixture::m_World->m_DynamicsWorld->performDiscreteCollisionDetection();
+    ASSERT_EQ(0, CountBulletContactPoints(TestFixture::m_World));
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, object_a);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(large_sphere);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(distant_box);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, object_b);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(object_b_shape);
+}
+#endif
+
+TYPED_TEST(PhysicsTest, UserData)
+{
+    VisualObject vo_a;
+    VisualObject vo_b;
+    dmPhysics::CollisionObjectData data;
+    data.m_UserData = &vo_a;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(1.0f, 1.0f, 1.0f));
+    typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    ASSERT_EQ((void*)&vo_a, (*TestFixture::m_Test.m_GetCollisionObjectUserDataFunc)(co));
+    (*TestFixture::m_Test.m_SetCollisionObjectUserDataFunc)(co, (void*)&vo_b);
+
+    ASSERT_EQ((void*)&vo_b, (*TestFixture::m_Test.m_GetCollisionObjectUserDataFunc)(co));
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+void DrawLines(Point3* points, uint32_t point_count, Vector4 color, void* user_data)
+{
+    bool* drew = (bool*)user_data;
+    *drew = true;
+}
+
+void DrawTriangles(Point3* points, uint32_t point_count, Vector4 color, void* user_data)
+{
+    bool* drew = (bool*)user_data;
+    *drew = true;
+}
+
+TYPED_TEST(PhysicsTest, DrawDebug)
+{
+    bool drew = false;
+    dmPhysics::DebugCallbacks callbacks;
+    callbacks.m_DrawLines = DrawLines;
+    callbacks.m_DrawTriangles = DrawTriangles;
+    callbacks.m_UserData = &drew;
+    (*TestFixture::m_Test.m_SetDebugCallbacksFunc)(TestFixture::m_Context, callbacks);
+
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(1.0f, 1.0f, 1.0f));
+    typename TypeParam::CollisionObjectType co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    drew = false;
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_FALSE(drew);
+
+    drew = false;
+    (*TestFixture::m_Test.m_SetDrawDebugFunc)(TestFixture::m_World, true);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_TRUE(drew);
+
+    drew = false;
+    (*TestFixture::m_Test.m_SetDrawDebugFunc)(TestFixture::m_World, false);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_FALSE(drew);
+
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+bool DistanceContactPointCallback(const dmPhysics::ContactPoint& contact_point, void* user_data)
+{
+    float* distance = (float*)user_data;
+    *distance = contact_point.m_Distance;
+    return true;
+}
+
+TYPED_TEST(PhysicsTest, SphereSphereDistance)
+{
+    float radius = 0.5f;
+
+    VisualObject vo_a;
+    vo_a.m_Position.setY(0.75f);
+    dmPhysics::CollisionObjectData data_a;
+    typename TypeParam::CollisionShapeType shape_a = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+    data_a.m_Group = 1 << FILTER_GROUP_A;
+    data_a.m_Mask = 1 << FILTER_GROUP_B;
+    data_a.m_UserData = &vo_a;
+    data_a.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data_a.m_Mass = 0.0f;
+    typename TypeParam::CollisionObjectType box_co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, &shape_a, 1u);
+
+    VisualObject vo_b;
+    dmPhysics::CollisionObjectData data_b;
+    typename TypeParam::CollisionShapeType shape_b = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+    data_b.m_Group = 1 << FILTER_GROUP_B;
+    data_b.m_Mask = 1 << FILTER_GROUP_A;
+    data_b.m_UserData = &vo_b;
+    data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data_b.m_Mass = 0.0f;
+    typename TypeParam::CollisionObjectType box_co_b = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_b, &shape_b, 1u);
+
+    int collision_count[FILTER_GROUP_COUNT];
+    memset(collision_count, 0, FILTER_GROUP_COUNT * sizeof(int));
+    int contact_point_count[FILTER_GROUP_COUNT];
+    memset(contact_point_count, 0, FILTER_GROUP_COUNT * sizeof(int));
+
+    float distance = 0.0f;
+
+    TestFixture::m_StepWorldContext.m_CollisionCallback = 0;
+    TestFixture::m_StepWorldContext.m_CollisionUserData = 0;
+    TestFixture::m_StepWorldContext.m_ContactPointCallback = DistanceContactPointCallback;
+    TestFixture::m_StepWorldContext.m_ContactPointUserData = &distance;
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_NEAR(0.25f, distance, 0.000001f);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_a);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_b);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_a);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_b);
+}
+
+TYPED_TEST(PhysicsTest, SphereBoxDistance)
+{
+    float radius = 0.5f;
+
+    VisualObject vo_a;
+    vo_a.m_Position.setY(0.75f);
+    dmPhysics::CollisionObjectData data_a;
+    typename TypeParam::CollisionShapeType shape_a = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+    data_a.m_Group = 1 << FILTER_GROUP_A;
+    data_a.m_Mask = 1 << FILTER_GROUP_B;
+    data_a.m_UserData = &vo_a;
+    data_a.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data_a.m_Mass = 0.0f;
+    typename TypeParam::CollisionObjectType box_co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, &shape_a, 1u);
+
+    VisualObject vo_b;
+    dmPhysics::CollisionObjectData data_b;
+    typename TypeParam::CollisionShapeType shape_b = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(radius, radius, radius));
+    data_b.m_Group = 1 << FILTER_GROUP_B;
+    data_b.m_Mask = 1 << FILTER_GROUP_A;
+    data_b.m_UserData = &vo_b;
+    data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data_b.m_Mass = 0.0f;
+    typename TypeParam::CollisionObjectType box_co_b = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_b, &shape_b, 1u);
+
+    int collision_count[FILTER_GROUP_COUNT];
+    memset(collision_count, 0, FILTER_GROUP_COUNT * sizeof(int));
+    int contact_point_count[FILTER_GROUP_COUNT];
+    memset(contact_point_count, 0, FILTER_GROUP_COUNT * sizeof(int));
+
+    float distance = 0.0f;
+
+    TestFixture::m_StepWorldContext.m_CollisionCallback = 0;
+    TestFixture::m_StepWorldContext.m_CollisionUserData = 0;
+    TestFixture::m_StepWorldContext.m_ContactPointCallback = DistanceContactPointCallback;
+    TestFixture::m_StepWorldContext.m_ContactPointUserData = &distance;
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_NEAR(0.25f, distance, 0.000001f);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_a);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_b);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_a);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_b);
+}
+
+TYPED_TEST(PhysicsTest, KinematicSleep)
+{
+    float box_half_ext = 0.5f;
+
+    VisualObject box0_vo;
+    box0_vo.m_Position = Point3(0, 5.0f, 0);
+    dmPhysics::CollisionObjectData box0_data;
+    box0_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    box0_data.m_Mass = 0.0f;
+    typename TypeParam::CollisionShapeType box0_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    box0_data.m_UserData = &box0_vo;
+    typename TypeParam::CollisionObjectType box0_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, box0_data, &box0_shape, 1u);
+
+    ASSERT_FALSE((*TestFixture::m_Test.m_IsSleepingFunc)(box0_co));
+
+    const float sleep_time = 2.1f; // 2 in bullet, 0.5 in box
+    int steps = (int)(sleep_time / TestFixture::m_StepWorldContext.m_DT);
+    for (int i = 0; i < steps; ++i)
+    {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    ASSERT_TRUE((*TestFixture::m_Test.m_IsSleepingFunc)(box0_co));
+
+    box0_vo.m_Position += Vector3(0.1f, 0.0f, 0.0f);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_FALSE((*TestFixture::m_Test.m_IsSleepingFunc)(box0_co));
+
+    for (int i = 0; i < steps; ++i)
+    {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    ASSERT_TRUE((*TestFixture::m_Test.m_IsSleepingFunc)(box0_co));
+
+    // 1 degree rotation
+    box0_vo.m_Rotation = Quat::rotationZ(1.0f * M_PI / 180.0f);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_FALSE((*TestFixture::m_Test.m_IsSleepingFunc)(box0_co));
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box0_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(box0_shape);
+}
+
+// Although we don't have a good way of testing the functionality here (we do it in an integration test instead),
+// we need to make sure the linking will work as expected
+TYPED_TEST(PhysicsTest, Wakeup)
+{
+    float box_half_ext = 0.5f;
+
+    VisualObject box0_vo;
+    box0_vo.m_Position = Point3(0, 5.0f, 0);
+    dmPhysics::CollisionObjectData box0_data;
+    box0_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    box0_data.m_Mass = 0.0f;
+    typename TypeParam::CollisionShapeType box0_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    box0_data.m_UserData = &box0_vo;
+    typename TypeParam::CollisionObjectType box0_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, box0_data, &box0_shape, 1u);
+
+    (*TestFixture::m_Test.m_WakeupFunc)(box0_co);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box0_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(box0_shape);
+}
+
+// Detecting native bug in box2d when the penetration distance assumes a negative amount
+TYPED_TEST(PhysicsTest, SphereBoxDeepPenetration)
+{
+    float radius = 0.5f;
+
+    VisualObject vo_a;
+    vo_a.m_Position.setY(1.0f);
+    dmPhysics::CollisionObjectData data_a;
+    typename TypeParam::CollisionShapeType shape_a = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+    data_a.m_Group = 1 << FILTER_GROUP_A;
+    data_a.m_Mask = 1 << FILTER_GROUP_B;
+    data_a.m_UserData = &vo_a;
+    data_a.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data_a.m_Mass = 0.0f;
+    typename TypeParam::CollisionObjectType box_co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, &shape_a, 1u);
+
+    VisualObject vo_b;
+    dmPhysics::CollisionObjectData data_b;
+    typename TypeParam::CollisionShapeType shape_b = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(radius, radius, radius));
+    data_b.m_Group = 1 << FILTER_GROUP_B;
+    data_b.m_Mask = 1 << FILTER_GROUP_A;
+    data_b.m_UserData = &vo_b;
+    data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data_b.m_Mass = 0.0f;
+    typename TypeParam::CollisionObjectType box_co_b = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_b, &shape_b, 1u);
+
+    int collision_count[FILTER_GROUP_COUNT];
+    memset(collision_count, 0, FILTER_GROUP_COUNT * sizeof(int));
+    int contact_point_count[FILTER_GROUP_COUNT];
+    memset(contact_point_count, 0, FILTER_GROUP_COUNT * sizeof(int));
+
+    float distance = 0.0f;
+
+    TestFixture::m_StepWorldContext.m_CollisionCallback = 0;
+    TestFixture::m_StepWorldContext.m_CollisionUserData = 0;
+    TestFixture::m_StepWorldContext.m_ContactPointCallback = DistanceContactPointCallback;
+    TestFixture::m_StepWorldContext.m_ContactPointUserData = &distance;
+
+    int steps = 40;
+    float y = 1.0f;
+    float delta = 2.0f / steps;
+    for (int i = 0; i < steps; ++i) {
+        y -= delta;
+        vo_a.m_Position.setY(y);
+        distance = 0.0f;
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+        float actual = 1.0f - dmMath::Abs(y);
+        ASSERT_NEAR(distance, actual, 0.0005f);
+    }
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_a);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_b);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_a);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_b);
+}
+
+struct ScaledImpulsesUserData
+{
+    float m_AppliedImpulse;
+    bool m_CallbackCalled;
+};
+
+bool CollectImpulseContactPointCallback(const dmPhysics::ContactPoint& contact_point, void* user_data)
+{
+    ScaledImpulsesUserData* ud = (ScaledImpulsesUserData*)user_data;
+    ud->m_AppliedImpulse += contact_point.m_AppliedImpulse;
+    ud->m_CallbackCalled = true;
+    return true;
+}
+
+// Checking that applied impulses are scaled correctly
+// The test drops a sphere from a distance and let it fall under gravity to collide
+// with a static block. Immediately after the contact, the test attempt to freeze the
+// sphere in mid-air using the applied impulse and reversed gravity.
+TYPED_TEST(PhysicsTest, ScaledImpulses)
+{
+    float radius = 0.5f;
+
+    VisualObject vo_a;
+    vo_a.m_Position.setY(10.0f);
+    dmPhysics::CollisionObjectData data_a;
+    typename TypeParam::CollisionShapeType shape_a = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+    data_a.m_Group = 1;
+    data_a.m_Mask = 1;
+    data_a.m_UserData = &vo_a;
+    data_a.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_DYNAMIC;
+    data_a.m_Mass = 1.0f;
+    data_a.m_Restitution = 1.0f;
+    typename TypeParam::CollisionObjectType box_co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, &shape_a, 1u);
+
+    VisualObject vo_b;
+    dmPhysics::CollisionObjectData data_b;
+    typename TypeParam::CollisionShapeType shape_b = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(radius, radius, radius));
+    data_b.m_Group = 1;
+    data_b.m_Mask = 1;
+    data_b.m_UserData = &vo_b;
+    data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    data_b.m_Mass = 0.0f;
+    data_b.m_Restitution = 1.0f;
+    typename TypeParam::CollisionObjectType box_co_b = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_b, &shape_b, 1u);
+
+    ScaledImpulsesUserData ud = {};
+    TestFixture::m_StepWorldContext.m_CollisionCallback = 0;
+    TestFixture::m_StepWorldContext.m_CollisionUserData = 0;
+    TestFixture::m_StepWorldContext.m_ContactPointCallback = CollectImpulseContactPointCallback;
+    TestFixture::m_StepWorldContext.m_ContactPointUserData = &ud;
+
+    int steps = 400;
+    for (int i = 0; i < steps && !ud.m_CallbackCalled; ++i) {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    steps = 10;
+    float y = 0.0f;
+    float applied_impulse = ud.m_AppliedImpulse;
+#if defined(PHYSICS_TEST_BULLET_3D)
+    const float position_tolerance = 0.015f;
+#else
+    const float position_tolerance = 0.01f;
+#endif
+
+    for (int i = 0; i < steps; ++i) {
+        (*TestFixture::m_Test.m_ApplyForceFunc)(TestFixture::m_Context, box_co_a, Vector3(0, -applied_impulse * 0.5f / TestFixture::m_StepWorldContext.m_DT + 10, 0), vo_a.m_Position);
+        applied_impulse = 0.0f;
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+        // Box2d V3 change:
+        // In the old box2d version when the first collision was detected, the object was resolved immediately according to the applied impulse,
+        // but in the new version there are more settings that affect how the object is resolved. With the default settings we use now,
+        // box2d requires an extra step in order to move the object outside of the collision.
+        //
+        // I could kinda get this to work by adjusting the settings to something like:
+        // worldDef.contactDampingRatio = 0.0f;
+        // worldDef.maximumLinearSpeed = 1.0f;
+        // worldDef.contactPushMaxSpeed = 1.0f;
+        //
+        // .. but these have side-effects for actual projects, so it's not something we can really use, so for now I've modified the test
+        // to update the test position after the first resolve here. I'm not sure if it's correct or not, but it's the best I can do..
+        if (i == 0)
+        {
+            y = vo_a.m_Position.getY();
+        }
+
+    #if 0
+        printf("y = %f\n", y);
+        printf("vo_a.m_Position.getY() = %f\n", vo_a.m_Position.getY());
+        printf("%f\n", fabs(y - vo_a.m_Position.getY()));
+    #endif
+
+        ASSERT_NEAR(y, vo_a.m_Position.getY(), position_tolerance);
+    }
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_a);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_b);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_a);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_b);
+}
+
+struct TriggerUserData
+{
+    int32_t m_Count;
+    void* m_UserDataA;
+    void* m_UserDataB;
+};
+
+void TriggerEntered(const dmPhysics::TriggerEnter& trigger_enter, void* user_data)
+{
+    TriggerUserData* ud = (TriggerUserData*)user_data;
+    ud->m_Count += 1;
+    ud->m_UserDataA = trigger_enter.m_UserDataA;
+    ud->m_UserDataB = trigger_enter.m_UserDataB;
+}
+
+void TriggerExited(const dmPhysics::TriggerExit& trigger_exit, void* user_data)
+{
+    TriggerUserData* ud = (TriggerUserData*)user_data;
+    ud->m_Count -= 1;
+    ud->m_UserDataA = trigger_exit.m_UserDataA;
+    ud->m_UserDataB = trigger_exit.m_UserDataB;
+}
+
+// Verify that enter/exit callbacks are used correctly for a single object that interacts with a trigger.
+TYPED_TEST(PhysicsTest, TriggerEnterExit)
+{
+    float radius = 0.5f;
+
+    VisualObject vo_a;
+    vo_a.m_Position.setX(10.0f);
+    dmPhysics::CollisionObjectData data_a;
+    typename TypeParam::CollisionShapeType shape_a = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+    data_a.m_Group = 1;
+    data_a.m_Mask = 1;
+    data_a.m_UserData = &vo_a;
+    data_a.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+    data_a.m_Mass = 0.0f;
+    data_a.m_Restitution = 1.0f;
+    typename TypeParam::CollisionObjectType box_co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, &shape_a, 1u);
+
+    VisualObject vo_b;
+    dmPhysics::CollisionObjectData data_b;
+    typename TypeParam::CollisionShapeType shape_b = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+    data_b.m_Group = 1;
+    data_b.m_Mask = 1;
+    data_b.m_UserData = &vo_b;
+    data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER;
+    data_b.m_Mass = 0.0f;
+    data_b.m_Restitution = 1.0f;
+    typename TypeParam::CollisionObjectType box_co_b = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_b, &shape_b, 1u);
+
+    TriggerUserData ud = {0, 0, 0};
+    TestFixture::m_StepWorldContext.m_TriggerEnteredCallback = TriggerEntered;
+    TestFixture::m_StepWorldContext.m_TriggerEnteredUserData = &ud;
+    TestFixture::m_StepWorldContext.m_TriggerExitedCallback = TriggerExited;
+    TestFixture::m_StepWorldContext.m_TriggerExitedUserData = &ud;
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_EQ(0, ud.m_Count);
+
+    // Move kinematic inside, assert entry
+    vo_a.m_Position.setX(1.0f);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_EQ(1, ud.m_Count);
+    // We don't know the order of objects in the callback, test that either is valid
+    ASSERT_TRUE((ud.m_UserDataA == &vo_a && ud.m_UserDataB == &vo_b) || (ud.m_UserDataA == &vo_b && ud.m_UserDataB == &vo_a));
+
+    // Move kinematic inside, assert no second entry
+    vo_a.m_Position.setX(0.5f);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_EQ(1, ud.m_Count);
+
+    // Move kinematic outside, assert exit
+    vo_a.m_Position.setX(10.0f);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_EQ(0, ud.m_Count);
+    // We don't know the order of objects in the callback, test that either is valid
+    ASSERT_TRUE((ud.m_UserDataA == &vo_a && ud.m_UserDataB == &vo_b) || (ud.m_UserDataA == &vo_b && ud.m_UserDataB == &vo_a));
+
+    // Move kinematic inside, assert entry
+    vo_a.m_Position.setX(1.0f);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_EQ(1, ud.m_Count);
+
+    // Disable kinematic, assert exit
+    (*TestFixture::m_Test.m_SetEnabledFunc)(TestFixture::m_World, box_co_a, false);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_EQ(0, ud.m_Count);
+
+    // Enable kinematic, assert entry
+    (*TestFixture::m_Test.m_SetEnabledFunc)(TestFixture::m_World, box_co_a, true);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_EQ(1, ud.m_Count);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_a);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_b);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_a);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_b);
+}
+
+// Three triggers: two overlap from creation (one enter pair), a third moves into both (two enters),
+// then leaves (two exits). Exercises trigger–trigger overlaps and a third body overlapping two triggers.
+TYPED_TEST(PhysicsTest, TriggerThreeOverlapping)
+{
+    float radius = 0.5f;
+
+    VisualObject vo_t1;
+    vo_t1.m_Position = Point3(0.0f, 0.0f, 0.0f);
+    VisualObject vo_t2;
+    vo_t2.m_Position = Point3(0.4f, 0.0f, 0.0f);
+    VisualObject vo_t3;
+    vo_t3.m_Position = Point3(10.0f, 0.0f, 0.0f);
+
+    dmPhysics::CollisionObjectData data_t;
+    typename TypeParam::CollisionShapeType shape_t1 = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+    typename TypeParam::CollisionShapeType shape_t2 = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+    typename TypeParam::CollisionShapeType shape_t3 = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+    data_t.m_Group = 1;
+    data_t.m_Mask = 1;
+    data_t.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER;
+    data_t.m_Mass = 0.0f;
+    data_t.m_Restitution = 1.0f;
+
+    data_t.m_UserData = &vo_t1;
+    typename TypeParam::CollisionObjectType co_t1 = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_t, &shape_t1, 1u);
+    data_t.m_UserData = &vo_t2;
+    typename TypeParam::CollisionObjectType co_t2 = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_t, &shape_t2, 1u);
+
+    TriggerUserData ud = {0, 0, 0};
+    TestFixture::m_StepWorldContext.m_TriggerEnteredCallback = TriggerEntered;
+    TestFixture::m_StepWorldContext.m_TriggerEnteredUserData = &ud;
+    TestFixture::m_StepWorldContext.m_TriggerExitedCallback = TriggerExited;
+    TestFixture::m_StepWorldContext.m_TriggerExitedUserData = &ud;
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_EQ(1, ud.m_Count);
+
+    data_t.m_UserData = &vo_t3;
+    typename TypeParam::CollisionObjectType co_t3 = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_t, &shape_t3, 1u);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_EQ(1, ud.m_Count);
+
+    // Inside both t1 and t2 (overlap region of the two circles)
+    vo_t3.m_Position = Point3(0.2f, 0.0f, 0.0f);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_EQ(3, ud.m_Count);
+
+    vo_t3.m_Position = Point3(10.0f, 0.0f, 0.0f);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    ASSERT_EQ(1, ud.m_Count);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co_t3);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co_t2);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, co_t1);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_t3);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_t2);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_t1);
+}
+
+// Verify that enter/exit callbacks are used correctly when objects are deleted inside a trigger.
+TYPED_TEST(PhysicsTest, TriggerEnterExitDelete)
+{
+    float radius = 0.5f;
+
+    VisualObject vo_b;
+    dmPhysics::CollisionObjectData data_b;
+    typename TypeParam::CollisionShapeType shape_b = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+    data_b.m_Group = 1;
+    data_b.m_Mask = 1;
+    data_b.m_UserData = &vo_b;
+    data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER;
+    data_b.m_Mass = 0.0f;
+    data_b.m_Restitution = 1.0f;
+    typename TypeParam::CollisionObjectType box_co_b = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_b, &shape_b, 1u);
+
+    TriggerUserData ud = {0, 0, 0};
+    TestFixture::m_StepWorldContext.m_TriggerEnteredCallback = TriggerEntered;
+    TestFixture::m_StepWorldContext.m_TriggerEnteredUserData = &ud;
+    TestFixture::m_StepWorldContext.m_TriggerExitedCallback = TriggerExited;
+    TestFixture::m_StepWorldContext.m_TriggerExitedUserData = &ud;
+
+    uint32_t it_count = 17;
+
+    for (uint32_t i = 0; i < it_count; ++i)
+    {
+        VisualObject vo_a;
+        vo_a.m_Position.setX(1.0f);
+        dmPhysics::CollisionObjectData data_a;
+        typename TypeParam::CollisionShapeType shape_a = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+        data_a.m_Group = 1;
+        data_a.m_Mask = 1;
+        data_a.m_UserData = &vo_a;
+        data_a.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+        data_a.m_Mass = 0.0f;
+        data_a.m_Restitution = 1.0f;
+        typename TypeParam::CollisionObjectType box_co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, &shape_a, 1u);
+
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+        // Deletions are not reported as exits
+        ASSERT_EQ((int32_t)(i+1), ud.m_Count);
+
+        (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_a);
+        (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_a);
+    }
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_b);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_b);
+}
+
+// Verify that there is no overflow when more objects interacts with a trigger than is supported (16).
+TYPED_TEST(PhysicsTest, TriggerEnterExitOverflow)
+{
+    float radius = 0.5f;
+
+    VisualObject vo_b;
+    dmPhysics::CollisionObjectData data_b;
+    typename TypeParam::CollisionShapeType shape_b = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+    data_b.m_Group = 1;
+    data_b.m_Mask = 1;
+    data_b.m_UserData = &vo_b;
+    data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER;
+    data_b.m_Mass = 0.0f;
+    data_b.m_Restitution = 1.0f;
+    typename TypeParam::CollisionObjectType box_co_b = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_b, &shape_b, 1u);
+
+    TriggerUserData ud = {0, 0, 0};
+    TestFixture::m_StepWorldContext.m_TriggerEnteredCallback = TriggerEntered;
+    TestFixture::m_StepWorldContext.m_TriggerEnteredUserData = &ud;
+    TestFixture::m_StepWorldContext.m_TriggerExitedCallback = TriggerExited;
+    TestFixture::m_StepWorldContext.m_TriggerExitedUserData = &ud;
+
+    const uint32_t it_count = 17; // max overlaps is currently set to 16
+
+    typename TypeParam::CollisionObjectType bodies[it_count];
+    typename TypeParam::CollisionShapeType shapes[it_count];
+
+    VisualObject vo[it_count];
+    for (uint32_t i = 0; i < it_count; ++i)
+    {
+        VisualObject& vo_a = vo[i];
+        vo_a.m_Position.setX(1.0f);
+        dmPhysics::CollisionObjectData data_a;
+        typename TypeParam::CollisionShapeType shape_a = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+        shapes[i] = shape_a;
+        data_a.m_Group = 1;
+        data_a.m_Mask = 1;
+        data_a.m_UserData = &vo_a;
+        data_a.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+        data_a.m_Mass = 0.0f;
+        data_a.m_Restitution = 1.0f;
+        typename TypeParam::CollisionObjectType box_co_a = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, &shape_a, 1u);
+        bodies[i] = box_co_a;
+    }
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    ASSERT_EQ((int32_t)(it_count - 1), ud.m_Count);
+
+    for (uint32_t i = 0; i < it_count; ++i)
+    {
+        (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, bodies[i]);
+        (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shapes[i]);
+    }
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co_b);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape_b);
+}
+
+// Verify that the cache is properly expanded when there are more trigger-interaction pairs than supported.
+TYPED_TEST(PhysicsTest, TriggerEnterExitExpansion)
+{
+    float radius = 0.4f;
+
+    const uint32_t x_dim = 10;
+    const uint32_t y_dim = 10;
+    const uint32_t obj_count = x_dim * y_dim;
+
+    typename TypeParam::CollisionShapeType trigger_shapes[obj_count];
+    typename TypeParam::CollisionObjectType trigger_bodies[obj_count];
+    VisualObject trigger_vos[obj_count];
+    typename TypeParam::CollisionShapeType shapes[obj_count];
+    typename TypeParam::CollisionObjectType bodies[obj_count];
+    VisualObject vos[obj_count];
+
+    for (uint32_t x = 0; x < x_dim; ++x)
+    {
+        for (uint32_t y = 0; y < y_dim; ++y)
+        {
+            uint32_t i = y + x * y_dim;
+            VisualObject vo_b;
+            vo_b.m_Position.setX((float) x);
+            vo_b.m_Position.setY((float) y);
+            trigger_vos[i] = vo_b;
+            dmPhysics::CollisionObjectData data_b;
+            trigger_shapes[i] = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+            data_b.m_Group = 1;
+            data_b.m_Mask = 1;
+            data_b.m_UserData = &trigger_vos[i];
+            data_b.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_TRIGGER;
+            data_b.m_Mass = 0.0f;
+            data_b.m_Restitution = 1.0f;
+            trigger_bodies[i] = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_b, &trigger_shapes[i], 1u);
+
+            VisualObject vo_a;
+            vo_a.m_Position.setX(x + 0.5f);
+            vo_a.m_Position.setY(y + 0.5f);
+            vos[i] = vo_a;
+            dmPhysics::CollisionObjectData data_a;
+            shapes[i] = (*TestFixture::m_Test.m_NewSphereShapeFunc)(TestFixture::m_Context, radius);
+            data_a.m_Group = 1;
+            data_a.m_Mask = 1;
+            data_a.m_UserData = &vos[i];
+            data_a.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_KINEMATIC;
+            data_a.m_Mass = 0.0f;
+            data_a.m_Restitution = 1.0f;
+            bodies[i] = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data_a, &shapes[i], 1u);
+        }
+    }
+
+    TriggerUserData ud = {0, 0, 0};
+    TestFixture::m_StepWorldContext.m_TriggerEnteredCallback = TriggerEntered;
+    TestFixture::m_StepWorldContext.m_TriggerEnteredUserData = &ud;
+    TestFixture::m_StepWorldContext.m_TriggerExitedCallback = TriggerExited;
+    TestFixture::m_StepWorldContext.m_TriggerExitedUserData = &ud;
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    // 64 is initial capacity of overlaps
+    //ASSERT_LT(64, count);
+    ASSERT_EQ(361, ud.m_Count);
+
+    for (uint32_t i = 0; i < obj_count; ++i)
+    {
+        (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, bodies[i]);
+        (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shapes[i]);
+        (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, trigger_bodies[i]);
+        (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(trigger_shapes[i]);
+    }
+}
+
+TYPED_TEST(PhysicsTest, LockedRotation)
+{
+    float ground_height_half_ext = 1.0f;
+    float box_half_ext = 0.5f;
+
+    VisualObject ground_visual_object;
+    dmPhysics::CollisionObjectData ground_data;
+    typename TypeParam::CollisionShapeType ground_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(100, ground_height_half_ext, 100));
+    ground_data.m_Mass = 0.0f;
+    ground_data.m_Type = dmPhysics::COLLISION_OBJECT_TYPE_STATIC;
+    ground_data.m_UserData = &ground_visual_object;
+    typename TypeParam::CollisionObjectType ground_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, ground_data, &ground_shape, 1u);
+
+    VisualObject box_visual_object;
+    box_visual_object.m_Position = Point3(0, 10, 0);
+    box_visual_object.m_Rotation = Quat(0, 0, 0.7, 0.7);
+    dmPhysics::CollisionObjectData box_data;
+    typename TypeParam::CollisionShapeType box_shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(box_half_ext, box_half_ext, box_half_ext));
+    box_data.m_UserData = &box_visual_object;
+    typename TypeParam::CollisionObjectType box_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, box_data, &box_shape, 1u);
+
+    (*TestFixture::m_Test.m_SetLockedRotationFunc)(box_co, true);
+
+    box_visual_object.m_CollisionCount = 0;
+    ground_visual_object.m_CollisionCount = 0;
+    TestFixture::m_CollisionCount = 0;
+    TestFixture::m_ContactPointCount = 0;
+    for (int i = 0; i < 100 && TestFixture::m_CollisionCount == 0; ++i)
+    {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+    for (int i = 0; i < 10; ++i)
+    {
+        (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+    }
+
+    Vector3 angular_velocity = (*TestFixture::m_Test.m_GetAngularVelocityFunc)(TestFixture::m_Context, box_co);
+    ASSERT_NEAR(0.0f, angular_velocity.getZ(), 0.000001f);
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, ground_co);
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, box_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(ground_shape);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(box_shape);
+}
+
+TYPED_TEST(PhysicsTest, DisabledFromStart)
+{
+    VisualObject vo;
+
+    // Dynamic RB
+
+    Point3 start_pos(1.0f, 2.0f, 0.0f);
+    Quat start_rot(0.0f, 0.0f, 0.0f, 1.0f);
+    vo.m_Position = start_pos;
+    vo.m_Rotation = start_rot;
+    dmPhysics::CollisionObjectData data;
+    typename TypeParam::CollisionShapeType shape = (*TestFixture::m_Test.m_NewBoxShapeFunc)(TestFixture::m_Context, Vector3(1.0f, 1.0f, 1.0f));
+    data.m_UserData = &vo;
+    data.m_Enabled = false;
+    typename TypeParam::CollisionObjectType dynamic_co = (*TestFixture::m_Test.m_NewCollisionObjectFunc)(TestFixture::m_World, data, &shape, 1u);
+
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    // Check static Y
+    ASSERT_EQ(start_pos.getElem(1), vo.m_Position.getElem(1));
+
+    (*TestFixture::m_Test.m_SetEnabledFunc)(TestFixture::m_World, dynamic_co, true);
+    (*TestFixture::m_Test.m_StepWorldFunc)(TestFixture::m_World, TestFixture::m_StepWorldContext);
+
+    // Check decreased Y (gravity)
+    ASSERT_GT(start_pos.getElem(1), vo.m_Position.getElem(1));
+
+    (*TestFixture::m_Test.m_DeleteCollisionObjectFunc)(TestFixture::m_World, dynamic_co);
+    (*TestFixture::m_Test.m_DeleteCollisionShapeFunc)(shape);
+}
+
+int main(int argc, char **argv)
+{
+    jc_test_init(&argc, argv);
+    return jc_test_run_all();
+}

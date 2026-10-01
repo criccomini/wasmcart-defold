@@ -1,0 +1,868 @@
+// Copyright 2020-2026 The Defold Foundation
+// Copyright 2014-2020 King
+// Copyright 2009-2014 Ragnar Svensson, Christian Murray
+// Licensed under the Defold License version 1.0 (the "License"); you may not use
+// this file except in compliance with the License.
+//
+// You may obtain a copy of the License, together with FAQs at
+// https://www.defold.com/license
+//
+// Unless required by applicable law or agreed to in writing, software distributed
+// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+// CONDITIONS OF ANY KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations under the License.
+
+#include <stdint.h>
+#include <string.h>
+#include <float.h>
+#include <dlib/webserver.h>
+#include <dlib/message.h>
+#include <dlib/dstrings.h>
+#include <dlib/math.h>
+#include <dlib/log.h>
+#include <dlib/profile.h>
+#include <dlib/socket.h>
+#include <dlib/sys.h>
+#include <dlib/time.h>
+#include <dlib/template.h>
+#include <ddf/ddf.h>
+#include <resource/resource.h>
+#include <gameobject/gameobject.h>
+#include "engine_service.h"
+#include "engine_service_private.h"
+#include "engine_service_discovery.h"
+#include "engine_version.h"
+
+extern unsigned char PROFILER_HTML[];
+extern uint32_t PROFILER_HTML_SIZE;
+
+namespace dmEngineService
+{
+    static const char INFO_TEMPLATE[] =
+    "{\"version\": \"${ENGINE_VERSION}\", \"platform\": \"${ENGINE_PLATFORM}\", \"sha1\": \"${ENGINE_SHA1}\", \"log_port\": \"${DEFOLD_LOG_PORT}\"}";
+    static const char STATE_TEMPLATE[] =
+    "{\"connection_mode\": ${CONNECTION_MODE}}";
+    static const char MDNS_SCHEMA_VERSION[] = "1";
+    static const char INTERNAL_SERVER_ERROR[] = "(500) Internal server error";
+    const char* const FOURCC_RESOURCES = "RESS";
+
+    struct EngineService
+    {
+        static void HttpServerHeader(void* user_data, const char* key, const char* value)
+        {
+            (void) user_data;
+            (void) key;
+            (void) value;
+        }
+
+        static bool ParsePostUrl(const char* resource, dmMessage::HSocket* socket, const dmDDF::Descriptor** desc, dmhash_t* message_id)
+        {
+            // Syntax: http://host:port/post/socket/message_type
+
+            char buf[256];
+            dmStrlCpy(buf, resource, sizeof(buf));
+
+            char* last;
+            int i = 0;
+            char* s = dmStrTok(buf, "/", &last);
+            bool error = false;
+
+            while (s && !error)
+            {
+                switch (i)
+                {
+                    case 0:
+                    {
+                        if (strcmp(s, "post") != 0)
+                        {
+                            error = true;
+                        }
+                    }
+                    break;
+
+                    case 1:
+                    {
+                        dmMessage::Result mr = dmMessage::GetSocket(s, socket);
+                        if (mr != dmMessage::RESULT_OK)
+                        {
+                            error = true;
+                        }
+                    }
+                    break;
+
+                    case 2:
+                    {
+                        *message_id = dmHashString64(s);
+                        *desc = dmDDF::GetDescriptorFromHash(*message_id);
+                        if (*desc == 0)
+                        {
+                            error = true;
+                        }
+                    }
+                    break;
+                }
+
+                s = dmStrTok(0, "/", &last);
+                ++i;
+            }
+
+            return !error;
+        }
+
+        static void SlurpHttpContent(dmWebServer::Request* request)
+        {
+            char buf[256];
+            uint32_t total_recv = 0;
+
+            while (total_recv < request->m_ContentLength)
+            {
+                uint32_t recv_bytes = 0;
+                uint32_t to_read = dmMath::Min((uint32_t) sizeof(buf), request->m_ContentLength - total_recv);
+                dmWebServer::Result r = dmWebServer::Receive(request, buf, to_read, &recv_bytes);
+                if (r != dmWebServer::RESULT_OK)
+                    return;
+                total_recv += recv_bytes;
+            }
+        }
+
+        static void PostHandler(void* user_data, dmWebServer::Request* request)
+        {
+            char msg_buf[1024];
+            const char* error_msg = "";
+            dmWebServer::Result r;
+            uint32_t recv_bytes = 0;
+            dmMessage::HSocket socket = 0;
+            const dmDDF::Descriptor* desc = 0;
+            dmhash_t message_id;
+
+            if (request->m_ContentLength > sizeof(msg_buf))
+            {
+                error_msg = "Too large message";
+                goto bail;
+            }
+
+            if (!ParsePostUrl(request->m_Resource, &socket, &desc, &message_id))
+            {
+                error_msg = "Invalid request";
+                goto bail;
+            }
+
+            r = dmWebServer::Receive(request, msg_buf, request->m_ContentLength, &recv_bytes);
+            if (r == dmWebServer::RESULT_OK)
+            {
+                void* msg;
+                uint32_t msg_size;
+                dmDDF::Result ddf_r = dmDDF::LoadMessage(msg_buf, recv_bytes, desc, &msg, dmDDF::OPTION_OFFSET_POINTERS, &msg_size);
+                if (ddf_r == dmDDF::RESULT_OK)
+                {
+                    dmMessage::URL url;
+                    url.m_Socket = socket;
+                    url.m_Path = 0;
+                    url.m_Fragment = 0;
+                    dmMessage::Post(0, &url, message_id, 0, (uintptr_t) desc, msg, msg_size, 0);
+                    dmDDF::FreeMessage(msg);
+                }
+            }
+            else
+            {
+                dmLogError("Error while reading message post data (%d)", r);
+                error_msg = INTERNAL_SERVER_ERROR;
+                goto bail;
+            }
+
+            dmWebServer::SetStatusCode(request, 200);
+            dmWebServer::Send(request, "OK", strlen("OK"));
+            return;
+
+    bail:
+            SlurpHttpContent(request);
+            dmLogError("%s", error_msg);
+            dmWebServer::SetStatusCode(request, 400);
+            dmWebServer::Send(request, error_msg, strlen(error_msg));
+        }
+
+        static void PingHandler(void* user_data, dmWebServer::Request* request)
+        {
+            dmWebServer::SetStatusCode(request, 200);
+            dmWebServer::Send(request, "PONG\n", strlen("PONG\n"));
+        }
+
+        static void InfoHandler(void* user_data, dmWebServer::Request* request)
+        {
+            EngineService* service = (EngineService*) user_data;
+            dmWebServer::SetStatusCode(request, 200);
+            dmWebServer::Send(request, service->m_InfoJson, strlen(service->m_InfoJson));
+        }
+
+        static void StateHandler(void* user_data, dmWebServer::Request* request)
+        {
+            EngineService* service = (EngineService*) user_data;
+            dmWebServer::SetStatusCode(request, 200);
+            dmWebServer::Send(request, service->m_StateJson, strlen(service->m_StateJson));
+        }
+        
+
+        static const char* ReplaceCallback(void* user_data, const char* key)
+        {
+            EngineService* self = (EngineService*) user_data;
+            if (strcmp(key, "DEFOLD_PORT") == 0)
+            {
+                return self->m_PortText;
+            }
+            else if (strcmp(key, "DEFOLD_LOG_PORT") == 0)
+            {
+                return self->m_LogPortText;
+            }
+            else if (strcmp(key, "NAME") == 0)
+            {
+                return self->m_Name;
+            }
+            else if (strcmp(key, "ENGINE_VERSION") == 0)
+            {
+                return dmEngineVersion::VERSION;
+            }
+            else if (strcmp(key, "ENGINE_SHA1") == 0)
+            {
+                return dmEngineVersion::VERSION_SHA1;
+            }
+            else if (strcmp(key, "ENGINE_PLATFORM") == 0)
+            {
+                return dmEngineVersion::PLATFORM;
+            }
+            else if (strcmp(key, "CONNECTION_MODE") == 0)
+            {
+                return ((EngineState*)user_data)->m_ConnectionAppMode ? "true" : "false";
+            }
+            else
+            {
+                return 0;
+            }
+        }
+
+        static void RedirectHandler(void* ctx, dmWebServer::Request* request)
+        {
+            HEngineService engine_service = (HEngineService)ctx;
+            char redirect[256];
+            dmSnPrintf(redirect, sizeof(redirect), "http://%s:%d%s", engine_service->m_LocalAddress, engine_service->m_Port, request->m_Resource);
+            dmWebServer::SetStatusCode(request, 302);
+            dmWebServer::SendAttribute(request, "Location", redirect);
+            dmWebServer::SendAttribute(request, "Cache-Control", "no-store");
+        }
+
+        bool Init(uint16_t port)
+        {
+            dmSys::SystemInfo info;
+            dmSys::GetSystemInfo(&info);
+            char host_name[128] = {0};
+            dmSocket::GetHostname(host_name, sizeof(host_name));
+
+            dmSocket::Address local_address;
+            dmSocket::Result sockr = dmSocket::GetLocalAddress(&local_address);
+            if (sockr != dmSocket::RESULT_OK)
+            {
+                return false;
+            }
+
+            m_Name[0] = 0;
+
+            /*
+             * NOTE: On Android localhost is returned for dmSocket::GetHostname.
+             * Therefore we use MANUFACTURER-DEVICEMODEL instead for display-name
+             *
+             */
+            if (strcmp(info.m_SystemName, "Android") == 0) {
+                BuildManufacturerModelName(info.m_Manufacturer, info.m_DeviceModel, m_Name, sizeof(m_Name));
+            } else {
+                dmStrlCpy(m_Name, host_name, sizeof(m_Name));
+            }
+
+            char* local_address_str = dmSocket::AddressToIPString(local_address);
+            const char* addr = local_address_str ? local_address_str : "";
+            if (addr[0] && strstr(m_Name, addr) == 0)
+            {
+                dmStrlCat(m_Name, " - ", sizeof(m_Name));
+                dmStrlCat(m_Name, addr, sizeof(m_Name));
+            }
+
+            dmStrlCat(m_Name, " - ", sizeof(m_Name));
+            dmStrlCat(m_Name, info.m_SystemName, sizeof(m_Name));
+
+            dmWebServer::NewParams params;
+            params.m_Port = port;
+            dmWebServer::HServer web_server;
+            dmWebServer::Result r = dmWebServer::New(&params, &web_server);
+            if (r != dmWebServer::RESULT_OK)
+            {
+                dmLogError("Unable to create engine web-server (%d)", r);
+                free(local_address_str);
+                return false;
+            }
+
+            dmSocket::Address address;
+            dmWebServer::GetName(web_server, &address, &m_Port);
+            dmSnPrintf(m_PortText, sizeof(m_PortText), "%d", (int) m_Port);
+            dmSnPrintf(m_LogPortText, sizeof(m_LogPortText), "%d", (int) dmLog::GetPort());
+
+            // The redirect server
+            params.m_Port = 8002;
+            dmWebServer::HServer web_server_redirect = 0;
+            r = dmWebServer::New(&params, &web_server_redirect);
+            if (r != dmWebServer::RESULT_OK)
+            {
+                dmLogWarning("Unable to create engine (redirect) web-server (%d), use port %d for engine services instead", r, m_Port);
+            }
+
+            // Our profiler doesn't support Ipv6 addresses, so let's assume localhost if it is Ipv6
+            if (local_address.m_family == dmSocket::DOMAIN_IPV4)
+            {
+                dmStrlCpy(m_LocalAddress, addr, sizeof(m_LocalAddress));
+            }
+            else
+            {
+                dmStrlCpy(m_LocalAddress, "localhost", sizeof(m_LocalAddress));
+            }
+
+            char discovery_identity[128];
+            BuildDiscoveryIdentity(addr, host_name, info.m_Manufacturer, info.m_DeviceModel, info.m_SystemName, discovery_identity, sizeof(discovery_identity));
+
+            char service_instance_suffix[9];
+            dmSnPrintf(service_instance_suffix, sizeof(service_instance_suffix), "%08x", (uint32_t) (dmTime::GetMonotonicTime() & 0xffffffffULL));
+
+            // DNS-SD instance labels are protocol identifiers, while the
+            // human-readable target name and stable editor identity are
+            // published separately in TXT.
+            BuildServiceInstanceName(discovery_identity, m_PortText, service_instance_suffix, m_ServiceInstanceName, sizeof(m_ServiceInstanceName));
+
+            // Service id must be unique and this scheme is probably unique enough.
+            /*
+             * Note that we use the engine service port for
+             * distinguishing the dmengine instances rather than the
+             * discovery endpoint port. Several dmengine's all running
+             * on the standard port (8001) will thus be
+             * indistinguishable. Having them show up as separate
+             * devices is pointless since we can't determine which one
+             * we're connecting to anyhow (port reuse).
+             */
+            dmSnPrintf(m_ServiceId, sizeof(m_ServiceId), "defold-%s:%s-%s", discovery_identity, m_PortText, info.m_DeviceModel);
+
+            free(local_address_str);
+
+            dmTemplate::Format(this, m_InfoJson, sizeof(m_InfoJson), INFO_TEMPLATE, ReplaceCallback);
+
+            DiscoveryTxtEntry txt_entries[] =
+            {
+                {"id", m_ServiceId},
+                {"name", m_Name},
+                {"log_port", m_LogPortText},
+                {"version", dmEngineVersion::VERSION},
+                {"platform", dmEngineVersion::PLATFORM},
+                {"sha1", dmEngineVersion::VERSION_SHA1},
+                {"schema", MDNS_SCHEMA_VERSION},
+            };
+            HDiscoveryService discovery_service = DiscoveryServiceNew(m_ServiceId, m_ServiceInstanceName, m_Port, txt_entries, sizeof(txt_entries) / sizeof(txt_entries[0]));
+
+            dmWebServer::HandlerParams post_params;
+            post_params.m_Handler = PostHandler;
+            post_params.m_Userdata = this;
+            dmWebServer::AddHandler(web_server, "/post", &post_params);
+
+            dmWebServer::HandlerParams ping_params;
+            ping_params.m_Handler = PingHandler;
+            ping_params.m_Userdata = this;
+            dmWebServer::AddHandler(web_server, "/ping", &ping_params);
+
+            dmWebServer::HandlerParams info_params;
+            info_params.m_Handler = InfoHandler;
+            info_params.m_Userdata = this;
+            dmWebServer::AddHandler(web_server, "/info", &info_params);
+
+            dmWebServer::HandlerParams state_params;
+            state_params.m_Handler = StateHandler;
+            state_params.m_Userdata = this;
+            dmWebServer::AddHandler(web_server, "/state", &state_params);
+
+            // Redirects from old profiler to the new
+            if (web_server_redirect)
+            {
+                dmWebServer::HandlerParams redirect_params;
+                redirect_params.m_Handler = RedirectHandler;
+                redirect_params.m_Userdata = this;
+                dmWebServer::AddHandler(web_server_redirect, "/", &redirect_params);
+            }
+
+            m_WebServer = web_server;
+            m_WebServerRedirect = web_server_redirect;
+            m_DiscoveryService = discovery_service;
+            m_Profile = 0; // Set during the update
+
+            dmLogInfo("Target listening with name: %s", m_Name);
+
+            return true;
+        }
+
+        void Final()
+        {
+            dmWebServer::Delete(m_WebServer);
+
+            if (m_WebServerRedirect)
+            {
+                dmWebServer::Delete(m_WebServerRedirect);
+            }
+
+            DiscoveryServiceDelete(m_DiscoveryService);
+        }
+
+        void FillState(EngineState* state)
+        {
+            dmTemplate::Format(state, m_StateJson, sizeof(m_StateJson), STATE_TEMPLATE, ReplaceCallback);
+        }
+
+        dmWebServer::HServer m_WebServer;
+        dmWebServer::HServer m_WebServerRedirect; // A redirect from 8002 to the engine service
+        uint16_t             m_Port;
+        char                 m_PortText[16];
+        char                 m_LogPortText[16];
+        char                 m_Name[128];
+        char                 m_ServiceInstanceName[128];
+        char                 m_LocalAddress[128];
+
+        char                 m_ServiceId[128];
+        HDiscoveryService    m_DiscoveryService;
+
+        char                 m_InfoJson[sizeof(INFO_TEMPLATE) + 512]; // 512 is rather arbitrary :-)
+        char                 m_StateJson[sizeof(STATE_TEMPLATE) + 512]; // 512 is rather arbitrary :-)
+
+        ResourceHandlerParams m_ResourceHandlerParams;
+        HProfile             m_Profile;
+    };
+
+    HEngineService New(uint16_t port)
+    {
+        HEngineService service = new EngineService();
+        if (service->Init(port))
+        {
+            /*
+             * This message is parsed by editor 2 - don't remove or change without
+             * corresponding changes in engine.clj
+             */
+            dmLogInfo("Engine service started on port %u", (unsigned int) GetPort(service));
+            return service;
+        }
+        else
+        {
+            delete service;
+            return 0;
+        }
+    }
+
+    void Delete(HEngineService engine_service)
+    {
+        engine_service->Final();
+        delete engine_service;
+    }
+
+    void Update(HEngineService engine_service, HProfile profile)
+    {
+        DM_PROFILE("Service");
+        engine_service->m_Profile = profile;
+        dmWebServer::Update(engine_service->m_WebServer);
+        if (engine_service->m_WebServerRedirect)
+        {
+            dmWebServer::Update(engine_service->m_WebServerRedirect);
+        }
+
+        engine_service->m_Profile = 0; // Don't leave a dangling pointer
+
+        DiscoveryServiceUpdate(engine_service->m_DiscoveryService);
+    }
+
+    uint16_t GetPort(HEngineService engine_service)
+    {
+        return engine_service->m_Port;
+    }
+
+    uint16_t GetServicePort(uint16_t default_port)
+    {
+        uint16_t engine_port = default_port;
+
+        char* service_port_env = dmSys::GetEnv("DM_SERVICE_PORT");
+
+        // editor 2 specifies DM_SERVICE_PORT=dynamic when launching dmengine
+        if (service_port_env) {
+            unsigned int env_port = 0;
+            if (sscanf(service_port_env, "%u", &env_port) == 1) {
+                engine_port = (uint16_t) env_port;
+            }
+            else if (strcmp(service_port_env, "dynamic") == 0) {
+                engine_port = 0;
+            }
+        }
+
+        return engine_port;
+    }
+
+    dmWebServer::HServer GetWebServer(HEngineService engine_service)
+    {
+        return engine_service ? engine_service->m_WebServer : 0;
+    }
+
+    #define CHECK_RESULT_BOOL(_RESULT) \
+        if (r != dmWebServer::RESULT_OK)\
+        {\
+            dmLogWarning("Unexpected http-server when transmitting profile data (%d)", _RESULT); \
+            return false; \
+        }
+
+    #define CHECK_RESULT(_RESULT) \
+        if (r != dmWebServer::RESULT_OK)\
+        {\
+            dmLogWarning("Unexpected http-server when transmitting profile data (%d)", _RESULT); \
+        }
+
+    static dmWebServer::Result SendString(dmWebServer::Request* request, const char* str)
+    {
+        uint16_t len = (uint16_t)strlen(str);
+        dmWebServer::Result r = dmWebServer::Send(request, &len, 2);
+        if (r != dmWebServer::RESULT_OK)
+        {
+            return r;
+        }
+        r = dmWebServer::Send(request, str, len);
+        return r;
+    }
+
+    static dmWebServer::Result SendText(dmWebServer::Request* request, const char* str)
+    {
+        return dmWebServer::Send(request, str, strlen(str));
+    }
+
+
+    //
+    // Resource profiler
+    //
+
+    static bool SendResourceData(dmWebServer::Request* request, const char* name, const char* extension, uint32_t size, uint32_t sizeOnDisc, uint32_t refCount)
+    {
+        dmWebServer::Result r;
+        r = SendString(request, name); CHECK_RESULT_BOOL(r);
+        r = SendString(request, extension); CHECK_RESULT_BOOL(r);
+        r = dmWebServer::Send(request, &size, 4); CHECK_RESULT_BOOL(r);
+        r = dmWebServer::Send(request, &sizeOnDisc, 4); CHECK_RESULT_BOOL(r);
+        r = dmWebServer::Send(request, &refCount, 4); CHECK_RESULT_BOOL(r);
+        return true;
+    }
+
+    static bool ResourceIteratorFunction(const dmResource::IteratorResource& resource, void* user_ctx)
+    {
+        dmWebServer::Request* request = (dmWebServer::Request*)user_ctx;
+
+        const char* name = dmHashReverseSafe64(resource.m_Id);
+        const char* extension = strrchr(name, '.');
+        if (!extension)
+            extension = "";
+        return SendResourceData(request, name, extension, resource.m_Size, resource.m_SizeOnDisc, resource.m_RefCount);
+    }
+
+    static void HttpResourceRequestCallback(void* context, dmWebServer::Request* request)
+    {
+        dmWebServer::SendAttribute(request, "Access-Control-Allow-Origin", "*");
+        dmWebServer::SendAttribute(request, "Cache-Control", "no-store");
+
+        ResourceHandlerParams* params = (ResourceHandlerParams*)context;
+        if (!params->m_Factory || !params->m_Regist)
+        {
+            dmWebServer::SetStatusCode(request, 500);
+            SendText(request, "Profiler state is not initialized");
+            return;
+        }
+
+        dmWebServer::Result r = SendString(request, FOURCC_RESOURCES);
+        if (r != dmWebServer::RESULT_OK)
+        {
+            dmLogWarning("Unexpected http-server when transmitting profile data (%d)", r);
+            return;
+        }
+        dmResource::IterateResources(params->m_Factory, ResourceIteratorFunction, (void*)request);
+    }
+
+    //
+    // GameObject profiler
+    //
+
+    static bool SendGameObjectData(dmWebServer::Request* request, dmhash_t id, dmhash_t resource_id, dmhash_t type, uint32_t index, uint32_t parent)
+    {
+        // See profiler.html, loadGameObjects() for the receiving end of this code
+        dmWebServer::Result r;
+        r = SendString(request, dmHashReverseSafe64(id)); CHECK_RESULT_BOOL(r);
+        r = SendString(request, dmHashReverseSafe64(resource_id)); CHECK_RESULT_BOOL(r);
+        r = SendString(request, dmHashReverseSafe64(type)); CHECK_RESULT_BOOL(r);
+        r = dmWebServer::Send(request, &index, 4); CHECK_RESULT_BOOL(r);
+        r = dmWebServer::Send(request, &parent, 4); CHECK_RESULT_BOOL(r);
+        return true;
+    }
+
+    static void OutputResourceSceneGraph(dmGameObject::SceneNode* node, uint32_t parent, uint32_t* counter, dmWebServer::Request* request)
+    {
+        static const dmhash_t s_PropertyId = dmHashString64("id");
+        static const dmhash_t s_PropertyResource = dmHashString64("resource");
+        static const dmhash_t s_PropertyType = dmHashString64("type");
+
+        if (node->m_Type == dmGameObject::SCENE_NODE_TYPE_SUBCOMPONENT)
+            return;
+
+        dmhash_t id = 0;
+        dmhash_t resource_id = 0;
+        dmhash_t type = 0;
+        dmGameObject::SceneNodePropertyIterator pit = TraverseIterateProperties(node);
+        while(dmGameObject::TraverseIteratePropertiesNext(&pit))
+        {
+            if (pit.m_Property.m_NameHash == s_PropertyId)
+                id = pit.m_Property.m_Value.m_Hash;
+            else if (pit.m_Property.m_NameHash == s_PropertyResource)
+                resource_id = pit.m_Property.m_Value.m_Hash;
+            else if (pit.m_Property.m_NameHash == s_PropertyType)
+                type = pit.m_Property.m_Value.m_Hash;
+        }
+
+        uint32_t index = (*counter)++;
+
+        SendGameObjectData(request, id, resource_id, type, index, parent);
+
+        dmGameObject::SceneNodeIterator it = dmGameObject::TraverseIterateChildren(node);
+        while(dmGameObject::TraverseIterateNext(&it))
+        {
+            OutputResourceSceneGraph( &it.m_Node, index, counter, request );
+        }
+    }
+
+    static void HttpGameObjectRequestCallback(void* context, dmWebServer::Request* request)
+    {
+        ResourceHandlerParams* params = (ResourceHandlerParams*)context;
+        dmGameObject::HRegister regist = params->m_Regist;
+        if (!regist)
+        {
+            dmWebServer::SetStatusCode(request, 500);
+            SendText(request, "Profiler state is not initialized");
+            return;
+        }
+
+        dmGameObject::SceneNode root;
+        if (!dmGameObject::TraverseGetRoot(regist, &root))
+        {
+            dmWebServer::SetStatusCode(request, 500);
+            SendText(request, "Failed to get root node");
+            return;
+        }
+
+        dmWebServer::SetStatusCode(request, 200);
+        dmWebServer::SendAttribute(request, "Access-Control-Allow-Origin", "*");
+        dmWebServer::SendAttribute(request, "Cache-Control", "no-store");
+
+        SendString(request, "GOBJ");
+
+        uint32_t counter = 1;
+        OutputResourceSceneGraph(&root, 0, &counter, request);
+    }
+
+    static void SendIndent(dmWebServer::Request* request, int indent)
+    {
+        const char buf[4] = {' ', ' ', ' ', ' '};
+        for (int i = 0; i < indent; ++i)
+            dmWebServer::Send(request, buf, sizeof(buf));
+    }
+
+    static void SendJsonEscapedText(dmWebServer::Request* request, const char* text)
+    {
+        SendText(request, "\"");
+        for (const char* p = text; *p; ++p)
+        {
+            switch (*p)
+            {
+                case '\"': SendText(request, "\\\""); break;
+                case '\\': SendText(request, "\\\\"); break;
+                case '\n': SendText(request, "\\n"); break;
+                case '\r': SendText(request, "\\r"); break;
+                case '\t': SendText(request, "\\t"); break;
+                default:
+                {
+                    char buf[2] = {*p, 0};
+                    SendText(request, buf);
+                    break;
+                }
+            }
+        }
+        SendText(request, "\"");
+    }
+
+    static float JsonSafeFloat(float f)
+    {
+        return isfinite(f) ? f : FLT_MAX;
+    }
+
+    static void OutputJsonProperty(dmGameObject::SceneNodeProperty* property, dmWebServer::Request* request, int indent)
+    {
+        SendIndent(request, indent);
+        SendText(request, "\"");
+        SendText(request, dmHashReverseSafe64(property->m_NameHash));
+        SendText(request, "\": ");
+
+        char buffer[512];
+        buffer[0] = 0;
+
+        switch(property->m_Type)
+        {
+        case dmGameObject::SCENE_NODE_PROPERTY_TYPE_HASH:
+            {
+                const char* rev_hash = (const char*)dmHashReverse64(property->m_Value.m_Hash, 0);
+                if (rev_hash)
+                    dmSnPrintf(buffer, sizeof(buffer), "\"%s\"", rev_hash);
+                else
+                    dmSnPrintf(buffer, sizeof(buffer), "\"0x%016llX\"", (unsigned long long)property->m_Value.m_Hash);
+            }
+            break;
+        case dmGameObject::SCENE_NODE_PROPERTY_TYPE_NUMBER: dmSnPrintf(buffer, sizeof(buffer), "%f", JsonSafeFloat(property->m_Value.m_Number)); break;
+        case dmGameObject::SCENE_NODE_PROPERTY_TYPE_BOOLEAN: dmSnPrintf(buffer, sizeof(buffer), "%d", property->m_Value.m_Bool?1:0); break;
+        case dmGameObject::SCENE_NODE_PROPERTY_TYPE_VECTOR3: dmSnPrintf(buffer, sizeof(buffer), "[%f, %f, %f]",
+            JsonSafeFloat(property->m_Value.m_V4[0]),
+            JsonSafeFloat(property->m_Value.m_V4[1]),
+            JsonSafeFloat(property->m_Value.m_V4[2]));
+            break;
+        case dmGameObject::SCENE_NODE_PROPERTY_TYPE_VECTOR4:
+        case dmGameObject::SCENE_NODE_PROPERTY_TYPE_QUAT: dmSnPrintf(buffer, sizeof(buffer), "[%f, %f, %f, %f]",
+            JsonSafeFloat(property->m_Value.m_V4[0]),
+            JsonSafeFloat(property->m_Value.m_V4[1]),
+            JsonSafeFloat(property->m_Value.m_V4[2]),
+            JsonSafeFloat(property->m_Value.m_V4[3]));
+            break;
+        case dmGameObject::SCENE_NODE_PROPERTY_TYPE_URL: dmSnPrintf(buffer, sizeof(buffer), "\"%s\"", property->m_Value.m_URL); break;
+        case dmGameObject::SCENE_NODE_PROPERTY_TYPE_TEXT: SendJsonEscapedText(request, property->m_Value.m_Text); break;
+        default: break;
+        }
+
+        if (buffer[0] != 0)
+        {
+            SendText(request, buffer);
+        }
+    }
+
+    static void OutputJsonSceneGraph(dmGameObject::SceneNode* node, dmWebServer::Request* request, int indent)
+    {
+        SendIndent(request, indent);
+        SendText(request, "{\n");
+
+        bool first_property = true;
+        dmGameObject::SceneNodePropertyIterator pit = TraverseIterateProperties(node);
+        while(dmGameObject::TraverseIteratePropertiesNext(&pit))
+        {
+            if (!first_property)
+                SendText(request, ",\n");
+            first_property = false;
+
+            OutputJsonProperty( &pit.m_Property, request, indent+1 );
+        }
+
+        if (!first_property)
+            SendText(request, ",\n");
+
+        SendIndent(request, indent+1);
+        SendText(request, "\"children\": [");
+
+        bool first_object = true;
+        dmGameObject::SceneNodeIterator it = dmGameObject::TraverseIterateChildren(node);
+        while(dmGameObject::TraverseIterateNext(&it))
+        {
+            if (!first_object)
+                SendText(request, ",\n");
+            else
+                SendText(request, "\n");
+            first_object = false;
+
+            OutputJsonSceneGraph( &it.m_Node, request, indent+1 );
+        }
+        SendText(request, "]\n");
+
+        SendIndent(request, indent);
+        SendText(request, "}");
+    }
+
+    static void HttpSceneGraphRequestCallback(void* context, dmWebServer::Request* request)
+    {
+        ResourceHandlerParams* params = (ResourceHandlerParams*)context;
+        dmGameObject::HRegister regist = params->m_Regist;
+        if (!regist)
+        {
+            dmWebServer::SetStatusCode(request, 500);
+            SendText(request, "Profiler state is not initialized");
+            return;
+        }
+
+        dmGameObject::SceneNode root;
+        if (!dmGameObject::TraverseGetRoot(regist, &root))
+        {
+            dmWebServer::SetStatusCode(request, 500);
+            SendText(request, "Failed to get root node");
+            return;
+        }
+
+        dmWebServer::SetStatusCode(request, 200);
+        dmWebServer::SendAttribute(request, "Content-Type", "application/json");
+        dmWebServer::SendAttribute(request, "Access-Control-Allow-Origin", "*");
+        dmWebServer::SendAttribute(request, "Cache-Control", "no-store");
+
+        OutputJsonSceneGraph(&root, request, 0);
+    }
+
+#undef CHECK_RESULT_BOOL
+
+    //
+    // All profilers' setup
+    //
+
+    static void ProfileHandler(void* user_data, dmWebServer::Request* request)
+    {
+        dmWebServer::SetStatusCode(request, 200);
+        dmWebServer::SendAttribute(request, "Content-Type", "text/html");
+        dmWebServer::SendAttribute(request, "Cache-Control", "no-store");
+        dmWebServer::Send(request, PROFILER_HTML, PROFILER_HTML_SIZE);
+    }
+
+    static void AddProfilerHandler(dmWebServer::HServer web_server, const char* path, const dmWebServer::HandlerParams* params)
+    {
+        dmWebServer::Result result = dmWebServer::AddHandler(web_server, path, params);
+        if (result != dmWebServer::RESULT_OK && result != dmWebServer::RESULT_HANDLER_ALREADY_REGISTRED)
+        {
+            dmLogWarning("Unable to register profiler handler '%s' (%d)", path, result);
+        }
+    }
+
+    void InitProfiler(HEngineService engine_service, dmResource::HFactory factory, dmGameObject::HRegister regist)
+    {
+        dmWebServer::HandlerParams resource_params;
+        resource_params.m_Handler = HttpResourceRequestCallback;
+        engine_service->m_ResourceHandlerParams.m_Factory = factory;
+        engine_service->m_ResourceHandlerParams.m_Regist = regist;
+        resource_params.m_Userdata = &engine_service->m_ResourceHandlerParams;
+        AddProfilerHandler(engine_service->m_WebServer, "/resources_data", &resource_params);
+
+        dmWebServer::HandlerParams gameobject_params;
+        gameobject_params.m_Handler = HttpGameObjectRequestCallback;
+        gameobject_params.m_Userdata = &engine_service->m_ResourceHandlerParams;
+        AddProfilerHandler(engine_service->m_WebServer, "/gameobjects_data", &gameobject_params);
+
+        dmWebServer::HandlerParams scenegraph_params;
+        scenegraph_params.m_Handler = HttpSceneGraphRequestCallback;
+        scenegraph_params.m_Userdata = &engine_service->m_ResourceHandlerParams;
+        AddProfilerHandler(engine_service->m_WebServer, "/scene_graph", &scenegraph_params);
+
+        // The entry point to the engine service profiler
+        dmWebServer::HandlerParams profile_params;
+        profile_params.m_Handler = ProfileHandler;
+        profile_params.m_Userdata = 0;
+        AddProfilerHandler(engine_service->m_WebServer, "/", &profile_params);
+    }
+
+     void InitState(HEngineService engine_service, EngineState* state)
+     {
+        engine_service->FillState(state);
+     }
+}

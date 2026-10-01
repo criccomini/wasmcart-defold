@@ -1,0 +1,97 @@
+-- Copyright 2020-2026 The Defold Foundation
+-- Copyright 2014-2020 King
+-- Copyright 2009-2014 Ragnar Svensson, Christian Murray
+-- Licensed under the Defold License version 1.0 (the "License"); you may not use
+-- this file except in compliance with the License.
+--
+-- You may obtain a copy of the License, together with FAQs at
+-- https://www.defold.com/license
+--
+-- Unless required by applicable law or agreed to in writing, software distributed
+-- under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+-- CONDITIONS OF ANY KIND, either express or implied. See the License for the
+-- specific language governing permissions and limitations under the License.
+
+function init(self)
+
+    local res, tile, group, tile_info
+
+    -- get_bounds
+    x, y, w, h = tilemap.get_bounds("#tilemap")
+    assert(x == -1)
+    assert(y == 0)
+    assert(w == 3)
+    assert(h == 2)
+
+    -- get_tile
+    tile = tilemap.get_tile("#tilemap", "layer", -1, 0)
+    assert(tile == 1)
+    tile = tilemap.get_tile("#tilemap", "layer", 0, 0)
+    assert(tile == 0)
+    tile = tilemap.get_tile("#tilemap", "layer", 1, 0)
+    assert(tile == 0)
+
+    tile = tilemap.get_tile("#tilemap", "layer", -1, 1)
+    assert(tile == 0)
+    tile = tilemap.get_tile("#tilemap", "layer", 0, 1)
+    assert(tile == 0)
+    tile = tilemap.get_tile("#tilemap", "layer", 1, 1)
+    assert(tile == 1)
+
+    -- get_tile_info
+    tile_info = tilemap.get_tile_info("#tilemap", "layer", -1, 0)
+    assert(tile_info.index == 1)
+    assert(tile_info.rotate_90 == true)
+    assert(tile_info.v_flip == true)
+    assert(tile_info.h_flip == true)
+    tile_info = tilemap.get_tile_info("#tilemap", "layer", 1, 1)
+    assert(tile_info.index == 1)
+    assert(tile_info.rotate_90 == true)
+    assert(tile_info.v_flip == false)
+    assert(tile_info.h_flip == false)
+
+    -- get_tiles
+    local tiles = tilemap.get_tiles("#tilemap", "layer")
+    assert(tiles[0][-1] == 1)
+    assert(tiles[0][1] == 0)
+    assert(tiles[1][1] == 1)
+    assert(tiles[1][-1] == 0)
+
+    -- out of range
+    tile = tilemap.get_tile("#tilemap", "layer", 2, 1)
+    assert(tile == nil)
+
+    -- set_tile
+    -- Ok
+    res = tilemap.set_tile("#tilemap", "layer", 1, 1, 0)
+    assert(res == true)
+    -- Flips
+    res = tilemap.set_tile("#tilemap", "layer", 1, 1, 0, true, true)
+    assert(res == true)
+    -- Cell index out of range
+    res = tilemap.set_tile("#tilemap", "layer", 1, 2, 0)
+    assert(res == false)
+    -- Invalid layer
+    res = tilemap.set_tile("#tilemap", "not_found_layer", 0, 0, 0)
+    assert(res == false)
+    -- Tile index out-of-range
+    ret = pcall(function() tilemap.set_tile("#tilemap", "layer", 0, 0, -1) end)
+    assert(ret == false)
+    ret = pcall(function() tilemap.set_tile("#tilemap", "layer", 0, 0, 5) end)
+    assert(ret == false)
+
+    -- verify hashed string works as argument to layer
+    tile = tilemap.get_tile("#tilemap", "layer", 1, 1)
+    assert(tile == 0)
+    res = tilemap.set_tile("#tilemap", hash("layer"), 1, 1, 1)
+    assert(res == true)
+    tile = tilemap.get_tile("#tilemap", hash("layer"), 1, 1)
+    assert(tile == 1)
+
+    -- Set tile out-of-range. Test for previous bug
+    msg.post("#tilemap", "set_tile", {layer_id = hash("layer"), position = go.get_position(), dx = 1})
+    msg.post("main:/main#script", "done")
+
+    -- testing the render constants
+    go.set("#tilemap", "tint", vmath.vector4(1,1,1,1))
+end

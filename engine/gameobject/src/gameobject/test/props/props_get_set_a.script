@@ -1,0 +1,103 @@
+-- Copyright 2020-2026 The Defold Foundation
+-- Copyright 2014-2020 King
+-- Copyright 2009-2014 Ragnar Svensson, Christian Murray
+-- Licensed under the Defold License version 1.0 (the "License"); you may not use
+-- this file except in compliance with the License.
+--
+-- You may obtain a copy of the License, together with FAQs at
+-- https://www.defold.com/license
+--
+-- Unless required by applicable law or agreed to in writing, software distributed
+-- under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+-- CONDITIONS OF ANY KIND, either express or implied. See the License for the
+-- specific language governing permissions and limitations under the License.
+
+go.property("number", 1)
+
+go.property("material", resource.material("material"))
+
+function init(self)
+    -- local game object properties
+    assert(go.get(".", "position") == go.get_position())
+    go.set(".", "position", vmath.vector3(1, 2, 3))
+    assert(go.get(".", "position") == vmath.vector3(1, 2, 3))
+    -- local script properties
+    assert(go.get("#", "number") == 1)
+    -- game object properties
+    local url = msg.url("/a")
+    local p = vmath.vector3(1, 2, 3)
+    local r = vmath.quat(1, 2, 3, 4)
+    local s = 2
+    local sv = vmath.vector3(1, 2, 3)
+    local e = vmath.vector3(1, 2, 3)
+    go.set(url, "position", p)
+    assert(go.get(url, "position") == p)
+    go.set(url, "rotation", r)
+    assert(go.get(url, "rotation") == r)
+    go.set(url, "scale", s)
+    assert(go.get_scale_uniform(url) == s)
+    go.set(url, "scale", sv)
+    assert(go.get(url, "scale") == sv)
+    go.set(url, "euler", e)
+    -- euler has low precision due to quat-conversion, test that error is sufficiently small
+    assert(vmath.length(go.get(url, "euler") - e)/3 < 0.02)
+
+    -- script properties
+    -- number
+    assert(go.get("b#script", "number") == 1)
+    local ok = pcall(go.set, "b#script", "number", "oops")
+    assert(not ok)
+    assert(go.get("b#script", "number") == 1)
+    go.set("b#script", "number", 2)
+    -- hash
+    assert(go.get("b#script", "hash") == hash("test"))
+    go.set("b#script", "hash", hash("test2"))
+    -- url
+    assert(go.get("b#script", "url") == msg.url("b#script"))
+    go.set("b#script", "url", msg.url())
+    -- vec3
+    go.set("b#script", "vec3.x", 1)
+    assert(go.get("b#script", "vec3.x") == 1)
+    go.set("b#script", "vec3.y", 2)
+    assert(go.get("b#script", "vec3.y") == 2)
+    go.set("b#script", "vec3.z", 3)
+    assert(go.get("b#script", "vec3.z") == 3)
+    assert(go.get("b#script", "vec3") == vmath.vector3(1, 2, 3))
+    go.set("b#script", "vec3", vmath.vector3(1, 1, 1))
+    -- vec4
+    go.set("b#script", "vec4.x", 1)
+    assert(go.get("b#script", "vec4.x") == 1)
+    go.set("b#script", "vec4.y", 2)
+    assert(go.get("b#script", "vec4.y") == 2)
+    go.set("b#script", "vec4.z", 3)
+    assert(go.get("b#script", "vec4.z") == 3)
+    go.set("b#script", "vec4.w", 4)
+    assert(go.get("b#script", "vec4.w") == 4)
+    assert(go.get("b#script", "vec4") == vmath.vector4(1, 2, 3, 4))
+    go.set("b#script", "vec4", vmath.vector4(1, 1, 1, 1))
+    -- quat
+    go.set("b#script", "quat.x", 1)
+    assert(go.get("b#script", "quat.x") == 1)
+    go.set("b#script", "quat.y", 2)
+    assert(go.get("b#script", "quat.y") == 2)
+    go.set("b#script", "quat.z", 3)
+    assert(go.get("b#script", "quat.z") == 3)
+    go.set("b#script", "quat.w", 4)
+    assert(go.get("b#script", "quat.w") == 4)
+    assert(go.get("b#script", "quat") == vmath.quat(1, 2, 3, 4))
+    go.set("b#script", "quat", vmath.quat(1, 1, 1, 1))
+    -- bool
+    assert(not go.get("b#script", "bool"))
+    go.set("b#script", "bool", true)
+    -- text
+    assert(go.get("b#script", "text") == "default text")
+    go.set("b#script", "text", "")
+    assert(go.get("b#script", "text") == "")
+    local text = "Spelare åäö\nsecond line"
+    go.set("b#script", "text", text)
+    assert(go.get("b#script", "text") == text)
+    -- material
+    assert(self.material == go.get("b#script", "material"))
+    go.set("b#script", "material", hash("material"))
+    assert(hash("material") == go.get("b#script", "material"))
+end

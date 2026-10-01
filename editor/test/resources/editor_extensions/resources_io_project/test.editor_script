@@ -1,0 +1,95 @@
+local M = {}
+
+---@param resource string
+---@param indent string?
+local function print_tree(resource, indent) 
+    indent = indent or ""
+    print(indent .. "/" .. resource:match("[^/]+$"))
+    local children = editor.can_get(resource, "children") and editor.get(resource, "children") or {}
+    local child_indent = indent .. "  "
+    for i = 1, #children do
+        print_tree(children[i], child_indent)
+    end
+end
+
+local function create_resources(resources)
+    local arg_str = ""
+    for i = 1, #resources do
+        local res = resources[i]
+        if type(res) == "string" then
+            arg_str = arg_str .. '"' .. res .. '"'
+        else
+            arg_str = arg_str .. '{"' .. res[1] .. '"'
+            if res[2] then
+                arg_str = arg_str .. ', "' .. res[2]:gsub("\"", "\\\"") .. '"'
+            end
+            arg_str = arg_str .. "}"
+        end
+        if i ~= #resources then
+            arg_str = arg_str .. ", "
+        end
+    end
+    local success, message = pcall(editor.create_resources, resources)
+    message = success and "ok!" or message or "failed"
+    print(("editor.create_resources({%s}) => %s"):format(arg_str, message))
+    print_tree("/test")
+end
+
+local function pprint_resource(resource, props)
+    local entity = {}
+    for i = 1, #props do
+        local p = props[i]
+        entity[p] = editor.get(resource, p)
+    end
+    print(("%s:"):format(resource))
+    pprint(entity)
+end
+
+local function expect_error(label, fn, ...)
+    local success, message = pcall(fn, ...)
+    print(("%s => %s"):format(label, success and "ok!" or message))
+end
+
+function M.get_commands()
+    return {
+        editor.command({
+            label = "Test",
+            locations = {"Edit"},
+            id = "defold.test",
+            run = function()
+                create_resources({
+                    {"/test/config.json", "{\"test\": true}"}
+                })
+                pprint_resource("/test/config.json", {"text"})
+
+                create_resources({
+                    "/test/npc.go", 
+                    "/test/npc.collection"
+                })
+                pprint_resource("/test/npc.go", {"components"})
+                pprint_resource("/test/npc.collection", {"name"})
+
+                create_resources({"/test/UPPER.COLLECTION"})
+                pprint_resource("/test/UPPER.COLLECTION", {"name"})
+                
+                create_resources({"/test/../../../outside.txt"})
+                create_resources({"/test/npc.go"})
+                create_resources({"/test/repeated.go", "/test/repeated.go"})
+                create_resources({
+                    {"/test/invalid.go", "\"name\":\"invalid\""}
+                })
+                expect_error("editor.tx.set(\"/test/invalid.go\", \"text\", ...)", editor.tx.set, "/test/invalid.go", "text", "name: \"invalid\"")
+                expect_error("editor.tx.add(\"/test/invalid.go\", \"components\", ...)", editor.tx.add, "/test/invalid.go", "components", {type = "label"})
+                expect_error("editor.tx.clear(\"/test/invalid.go\", \"components\")", editor.tx.clear, "/test/invalid.go", "components")
+                expect_error("editor.tx.remove(\"/test/invalid.go\", \"components\", ...)", editor.tx.remove, "/test/invalid.go", "components", "/test/invalid.go")
+                expect_error("editor.tx.reorder(\"/test/invalid.go\", \"components\", ...)", editor.tx.reorder, "/test/invalid.go", "components", {})
+                expect_error("editor.tx.reset(\"/test/invalid.go\", \"text\")", editor.tx.reset, "/test/invalid.go", "text")
+
+                editor.delete_directory("/test")
+            end
+        })
+    }
+end
+
+
+return M

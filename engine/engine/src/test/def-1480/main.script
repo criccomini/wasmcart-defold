@@ -1,0 +1,35 @@
+-- Copyright 2020-2026 The Defold Foundation
+-- Copyright 2014-2020 King
+-- Copyright 2009-2014 Ragnar Svensson, Christian Murray
+-- Licensed under the Defold License version 1.0 (the "License"); you may not use
+-- this file except in compliance with the License.
+--
+-- You may obtain a copy of the License, together with FAQs at
+-- https://www.defold.com/license
+--
+-- Unless required by applicable law or agreed to in writing, software distributed
+-- under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+-- CONDITIONS OF ANY KIND, either express or implied. See the License for the
+-- specific language governing permissions and limitations under the License.
+
+function init(self)
+
+    local maxnumproxies = sys.get_config_int("collection_proxy.max_count")
+    if maxnumproxies > 8 then
+        print("This test was designed for max 8 proxy collections. Please adjust accordingly")
+        msg.post("@system:", "exit", {code = 1})
+        return
+    end
+
+    msg.post("#", "start_level")
+end
+
+function on_message(self, message_id, message, sender)
+    if message_id == hash("start_level") then
+        -- some script tells us to start loading the level
+        msg.post("#proxy", "async_load")
+    elseif message_id == hash("proxy_loaded") then
+        -- enable the collection and let the loader know
+        msg.post(sender, "enable")
+    end
+end

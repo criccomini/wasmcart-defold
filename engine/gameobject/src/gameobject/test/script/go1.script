@@ -1,0 +1,95 @@
+-- Copyright 2020-2026 The Defold Foundation
+-- Copyright 2014-2020 King
+-- Copyright 2009-2014 Ragnar Svensson, Christian Murray
+-- Licensed under the Defold License version 1.0 (the "License"); you may not use
+-- this file except in compliance with the License.
+--
+-- You may obtain a copy of the License, together with FAQs at
+-- https://www.defold.com/license
+--
+-- Unless required by applicable law or agreed to in writing, software distributed
+-- under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+-- CONDITIONS OF ANY KIND, either express or implied. See the License for the
+-- specific language governing permissions and limitations under the License.
+
+local function assert_near(exp, act, eps)
+    assert(math.abs(exp - act) < eps, string.format("expected %f but was %f, differing by %f which exceeds %f", exp, act, math.abs(exp - act), eps))
+end
+
+local epsilon = 0.000001
+
+function init(self)
+    assert(go.get_id() == hash("my_object01"), "init id mismatch")
+    local p = go.get_position()
+    assert(p.x == 0)
+    assert(p.y == 0)
+    assert(p.z == 0)
+
+    local s = go.get_scale_uniform()
+    assert_near(1, s, epsilon)
+
+    self.counter = 0
+    assert(self.counter == 0)
+
+    self.counter = self.counter +  1
+    assert(self.counter == 1)
+    tmp = "1";
+end
+
+function update(self, dt)
+    assert(go.get_id() == hash("my_object01"), "update id mismatch")
+    assert(dt > 0, "no dt in update")
+    assert(self.counter == 1)
+
+    local i = 0
+    for k,v in pairs({nil, "my_object01", hash("my_object01"), "collection:my_object01",
+                      msg.url(), msg.url("my_object01"), msg.url("collection:my_object01")}) do
+        i = i + 1
+        -- NOTE: f(nil) is interpreted as f() for non-vargs functions in lua
+        print(v)
+        local p = go.get_position()
+        p.y = 123.0 + i
+        go.set_position(p, v)
+        p = go.get_position(v)
+        assert(p.y == 123.0 + i)
+
+        go.set_scale(i, v)
+        local s = go.get_scale_uniform(v)
+        local sv = go.get_scale(v)
+        assert_near(i, s, epsilon)
+        assert_near(i, sv.x, epsilon)
+        assert_near(i, sv.y, epsilon)
+        assert_near(i, sv.z, epsilon)
+
+        go.set_scale(vmath.vector3(2*i,3*i,4*i), v)
+        sv = go.get_scale(v)
+        assert_near(sv.x, 2*i, epsilon)
+        assert_near(sv.y, 3*i, epsilon)
+        assert_near(sv.z, 4*i, epsilon)
+
+        go.set_scale_xy(vmath.vector3(5*i,6*i,7*i), v)
+        sv = go.get_scale(v)
+        assert_near(sv.x, 5*i, epsilon)
+        assert_near(sv.y, 6*i, epsilon)
+        assert_near(sv.z, 4*i, epsilon)
+
+        go.set_scale_xy(i, v)
+        local sv = go.get_scale(v)
+        assert_near(i, sv.x, epsilon)
+        assert_near(i, sv.y, epsilon)
+        assert_near(4*i, sv.z, epsilon)
+    end
+
+    msg.post("@system:", "factory", {prototype = "test", pos = vmath.vector3(1, 2, 3)})
+end
+
+function on_message(self, message_id, message)
+    assert(go.get_id() == hash("my_object01"), "on_message id mismatch")
+    assert(message_id == hash("factory_result"))
+    assert(message.status == 1010)
+end
+
+function on_input(self, action_id, action)
+    assert(go.get_id() == hash("my_object01"), "on_input id mismatch")
+    assert(action_id == hash("test_action"), "on_input action id mismatch")
+end

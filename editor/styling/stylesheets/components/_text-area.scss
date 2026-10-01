@@ -1,0 +1,119 @@
+@use "sass:string";
+/*
+ * Basic reset
+ */
+.text-area {
+    -fx-background-color: none;
+    -fx-background-insets: 0;
+    -fx-background-radius: 0;
+    -fx-text-fill: -df-text-light;
+    -fx-prompt-text-fill: -df-text-dark;
+
+    .content {
+        -fx-background-color: none;
+        -fx-background-insets: 0;
+        -fx-background-radius: 0;
+    }
+
+    &:focused {
+        -fx-background-color: none;
+        -fx-background-insets: 0;
+        -fx-background-radius: 0;
+    }
+
+}
+
+.text-area > .scroll-pane {
+    -fx-background-color: string.unquote("null");
+}
+.text-area > .scroll-pane > .scroll-bar:horizontal {
+    -fx-background-radius: 0 0 0 0;
+}
+.text-area > .scroll-pane > .scroll-bar:vertical {
+    -fx-background-radius: 0 0 0 0;
+}
+.text-area > .scroll-pane > .corner {
+    -fx-background-radius: 0 0 0 0;
+}
+
+/*
+ * Multi-line text input for properties view
+ */
+.text-area.property {
+    -fx-padding: 0px;
+    -fx-border-width: 1px 1px 1px 1px;
+    -fx-border-color: -df-component-dark;
+    -fx-text-fill: -df-text;
+    -fx-highlight-fill: -df-background-light;
+    -fx-highlight-text-fill: -df-text-selected;
+
+    .content {
+        -fx-padding: 4px 8px;
+        -fx-cursor: text;
+        -fx-background-radius: 0;
+        -fx-background-color: -df-background-input;
+    }
+
+    &:hover {
+        -fx-border-color: -df-component-light;
+    }
+
+    &:focused {
+        -fx-padding: 0;
+        -fx-border-width: 1px 1px 2px 1px;
+        -fx-border-color: -df-component-light -df-component-light -df-defold-orange -df-component-light;
+        -fx-highlight-fill: -fx-accent;
+        -fx-highlight-text-fill: -df-text-selected;
+
+            .content {
+                -fx-background-color: -df-background;
+            }
+    }
+
+    &:readonly {
+        -fx-text-fill: -df-text;
+        -fx-cursor: default;
+
+        &:focused {
+            -fx-padding: 0px;
+            -fx-border-width: 1px 1px 1px 1px;
+            -fx-border-color: -df-background-lighter;
+            -fx-text-fill: -df-text;
+            -fx-prompt-text-fill: -df-text;
+        }
+    }
+}
+
+/*
+ * A shadow/borderless text-area that can be used when you want a
+ * multi-line label component where the text can be selected for copy &
+ * paste
+ */
+.copyable-text-area {
+    -fx-padding: 0;
+    -fx-cursor: default;
+    -fx-background-color: -df-background;
+}
+.copyable-text-area > .scroll-pane {
+    -fx-background-color: string.unquote("null");
+}
+.copyable-text-area > .scroll-pane > .scroll-bar:horizontal {
+    -fx-background-radius: 0 0 0 0;
+}
+.copyable-text-area > .scroll-pane > .scroll-bar:vertical {
+    -fx-background-radius: 0 0 0 0;
+}
+.copyable-text-area > .scroll-pane > .corner {
+    -fx-background-radius: 0 0 0 0;
+}
+.copyable-text-area .content {
+    -fx-padding: 0 0 0 0;
+    -fx-cursor: text;
+    -fx-background-color: -df-background;
+    -fx-background-radius: 0;
+}
+.copyable-text-area:focused .content {
+    -fx-background-color: -df-background;
+    -fx-background-insets: 0 0 0 0;
+    -fx-background-radius: 0 0 0 0;
+}

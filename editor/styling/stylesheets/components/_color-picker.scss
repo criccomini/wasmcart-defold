@@ -1,0 +1,36 @@
+.color-picker {
+    -fx-max-width: 24px;
+    -fx-min-width: 24px;
+    -fx-max-height: 27px;
+    -fx-min-height: 27px;
+    -fx-background-radius: 0;
+    -fx-border-radius: 0;
+    -fx-border-color: -df-background-lighter;
+    -fx-background-color: -df-background-lighter;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+
+    &:hover {
+        -fx-background-color: -df-component-lighter;
+    }
+
+    .color-picker-label {
+        -fx-padding: 5px;
+    }
+
+    .arrow,
+    .arrow-button {
+        visibility: hidden;
+    }
+}
+
+.color-input {
+    -fx-border-style: solid none solid solid;
+}
+
+.color-palette {
+    -fx-background-radius: 3;
+    -fx-border-radius: 3;
+    -fx-border-color: -df-background-lighter;
+    -fx-background-color: -df-component-darker;
+}

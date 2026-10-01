@@ -1,0 +1,18 @@
+emitters {
+    mode: PLAY_MODE_ONCE
+    duration: 0.2
+    space: EMISSION_SPACE_WORLD
+    position { x: 0 y: 0 z: 0 }
+    rotation {
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0
+    }
+    tile_source: "/particlefx/tile_valid.tileset"
+    animation: ""
+    material: "/particlefx/material_missing_name.material"
+    max_particle_count: 8
+    type: EMITTER_TYPE_CONE
+    pivot: { x: 0 y: 0 z: 0 }
+}

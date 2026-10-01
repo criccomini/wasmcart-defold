@@ -1,0 +1,159 @@
+#tool-tabs {
+    -fx-tab-min-height: 25px;
+    -fx-tab-min-width: 40px;
+    -fx-padding: 0 0 0 0;
+
+    .list-view {
+        -fx-background-insets: 0;
+        -fx-border-width: 0;
+    }
+
+    .tab-content-area {
+        -fx-background-color: -df-background-light;
+        -fx-padding: 0;
+
+        .content {
+            -fx-background-color: -df-background-light;
+            -fx-background-insets: 0;
+            -fx-padding: 0;
+            -fx-border-radius: 0;
+            -fx-border-width: 0;
+            -fx-border-insets: 0;
+        }
+
+        .text-area, .scroll-pane, .viewport {
+            -fx-background-color: -df-background-light;
+            -fx-background-insets: 0;
+            -fx-padding: 0;
+        }
+        .text-area {
+            -fx-padding: 15px 0 0 0;
+        }
+    }
+
+    .console-tab-base {
+        -fx-background-position: 10 3;
+        -fx-background-repeat: no-repeat;
+        -fx-background-size: 17 17;
+        -fx-padding: 0 10 5 32;
+        -fx-spacing: 0;
+    }
+}
+
+#console-tab {
+    @extend .console-tab-base;
+    -fx-background-image: url("icons/tabs/ic_console-grey.png");
+    &:selected {
+        -fx-background-image: url("icons/tabs/ic_console-white.png");
+    }
+    &:hover {
+        -fx-background-image: url("icons/tabs/ic_console-white.png");
+    }
+}
+
+#console-grid-pane {
+    -fx-padding: 0;
+}
+
+#curve-editor-tab {
+    @extend .console-tab-base;
+    -fx-background-image: url("icons/tabs/ic_curve-editor-grey.png");
+    -fx-background-position: 10 1 !important;
+    &:selected {
+        -fx-background-image: url("icons/tabs/ic_curve-editor-white.png");
+    }
+    &:hover {
+        -fx-background-image: url("icons/tabs/ic_curve-editor-white.png");
+    }
+}
+
+#build-errors-tab {
+    @extend .console-tab-base;
+    -fx-background-image: url("icons/tabs/ic_build-problems-grey.png");
+    &:selected {
+        -fx-background-image: url("icons/tabs/ic_build-problems-white.png");
+    }
+    &:hover {
+        -fx-background-image: url("icons/tabs/ic_build-problems-white.png");
+    }
+
+    .label {
+        -fx-padding: 5;
+    }
+}
+
+#build-errors-container {
+    -fx-padding: 0;
+    .tree-view {
+        // -fx-background-color: #ff0000;
+    }
+
+    .tree-cell {
+        HBox {
+            -fx-spacing: 9px;
+        }
+
+        Text {
+            -fx-fill: -df-text;
+        }
+        &:selected, &:hover {
+            Text {
+                -fx-fill: -df-text-selected;
+            }
+        }
+
+        @mixin colorize-severity($color, $active-color) {
+            & > .image-view {
+                -fx-effect: innershadow(gaussian, $color, 20, 1.0, 0, 0);
+            }
+            &:selected, &:hover {
+                & > .image-view {
+                    -fx-effect: innershadow(gaussian, $active-color, 20, 1.0, 0, 0);
+                }
+            }
+        }
+
+        $graphic-text-gap: 9px;
+
+        &.severity-error {
+            -fx-graphic-text-gap: $graphic-text-gap;
+            @include colorize-severity(-df-error-severity-fatal-dim, -df-error-severity-fatal);
+        }
+
+        &.severity-warning {
+            -fx-graphic-text-gap: $graphic-text-gap;
+            @include colorize-severity(-df-error-severity-warning-dim, -df-error-severity-warning);
+        }
+
+        &.severity-info {
+            -fx-graphic-text-gap: $graphic-text-gap;
+        }
+    }
+}
+
+#search-results-tab {
+    @extend .console-tab-base;
+    -fx-background-image: url("icons/tabs/ic_search-results-grey.png");
+    &:selected {
+        -fx-background-image: url("icons/tabs/ic_search-results-white.png");
+    }
+    &:hover {
+        -fx-background-image: url("icons/tabs/ic_search-results-white.png");
+    }
+}
+
+#search-results-container {
+    -fx-padding: 0;
+}
+
+#breakpoints-tab {
+    @extend .console-tab-base;
+    -fx-background-position: 10 4 !important;
+    -fx-background-image: url("icons/tabs/ic_breakpoints-grey.png");
+    &:selected {
+        -fx-background-image: url("icons/tabs/ic_breakpoints-white.png");
+    }
+    &:hover {
+        -fx-background-image: url("icons/tabs/ic_breakpoints-white.png");
+    }
+}

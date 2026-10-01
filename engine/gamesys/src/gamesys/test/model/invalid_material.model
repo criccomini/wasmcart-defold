@@ -1,0 +1,6 @@
+name: "valid"
+mesh: "/model/meshset_valid_gltf.gltf"
+material: "/model/material_missing_name.material"
+textures: "/model/texture_valid_png.png"
+animations: "/model/meshset_valid_gltf.gltf"
+default_animation: ""

@@ -1,0 +1,47 @@
+#error-dialog {
+  .text-run {
+    -fx-fill: -df-text;
+    -fx-font-smoothing-type: lcd;
+  }
+
+  .link-run {
+    -fx-font-size: 110%;
+    -fx-text-fill: -df-defold-blue-light;
+    -fx-padding: 0;
+    -fx-underline: false;
+    -fx-cursor: default;
+
+    &:hover {
+      -fx-text-fill: -df-defold-blue-lighter;
+    }
+  }
+
+  #toggle-details {
+    -fx-label-padding: 0;
+    >.text {
+      -fx-text-origin: center;
+    }
+    >.box {
+      -fx-padding: 0 2 0 0;
+      -fx-border-width: 0;
+      -fx-background-insets: 0;
+      -fx-background-radius: 0;
+      -fx-background-color: transparent;
+      >.mark {
+        -fx-background-image: url("icons/32/Icons_S_04_arrowright.png");
+        -fx-background-position: center;
+        -fx-background-repeat: stretch;
+        -fx-shape: none;
+      }
+    }
+
+    &:selected {
+      >.box {
+        >.mark {
+          -fx-background-color: transparent;
+          -fx-background-image: url("icons/32/Icons_S_05_arrowdown.png");
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+[project]
+title = Game Project Properties
+
+[bootstrap]
+main_collection = main.collectionc
+
+[display]
+variable_dt = 1
+update_frequency = 30
+vsync = 1
+
+[input]
+game_binding = game.input_bindingc
+
+[custom]
+love = defold

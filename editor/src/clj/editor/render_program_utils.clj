@@ -1,0 +1,188 @@
+;; Copyright 2020-2026 The Defold Foundation
+;; Copyright 2014-2020 King
+;; Copyright 2009-2014 Ragnar Svensson, Christian Murray
+;; Licensed under the Defold License version 1.0 (the "License"); you may not use
+;; this file except in compliance with the License.
+;;
+;; You may obtain a copy of the License, together with FAQs at
+;; https://www.defold.com/license
+;;
+;; Unless required by applicable law or agreed to in writing, software distributed
+;; under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+;; CONDITIONS OF ANY KIND, either express or implied. See the License for the
+;; specific language governing permissions and limitations under the License.
+
+(ns editor.render-program-utils
+  (:require [editor.protobuf :as protobuf]
+            [editor.protobuf-forms :as protobuf-forms]
+            [util.coll :as coll])
+  (:import [com.dynamo.render.proto Material$MaterialDesc$ConstantType Material$MaterialDesc$FilterModeMag Material$MaterialDesc$FilterModeMin Material$MaterialDesc$Sampler Material$MaterialDesc$WrapMode]))
+
+(set! *warn-on-reflection* true)
+
+(defn gen-form-data-constants [localization-key path-key]
+  {:path [path-key]
+   :localization-key localization-key
+   :type :2panel
+   :panel-key {:path [:name]
+               :type :string
+               :default "new_constant"}
+   :panel-form-fn
+   (let [constant-values (protobuf/enum-values Material$MaterialDesc$ConstantType)
+         default-constant-type (ffirst constant-values)
+         constant-options (vec (sort-by first (protobuf-forms/make-options constant-values)))]
+     (fn panel-form-fn [selected-constant]
+       {:sections
+        [{:fields
+          [{:path [:type]
+            :localization-key (str localization-key ".type")
+            :type :choicebox
+            :options constant-options
+            :default default-constant-type}
+           {:path [:value]
+            :localization-key (str localization-key ".value")
+            :type (case (:type selected-constant default-constant-type)
+                    :constant-type-user-color :color
+                    :constant-type-user-matrix4 :mat4
+                    :vec4)}]}]}))})
+
+(defn gen-form-data-samplers [localization-key path-key]
+  {:path [path-key]
+   :localization-key localization-key
+   :type :2panel
+   :panel-key {:path [:name]
+               :type :string
+               :default "texture_sampler"}
+   :panel-form
+   {:sections
+    [{:fields
+      (let [wrap-options (protobuf/enum-values Material$MaterialDesc$WrapMode)
+            min-options (protobuf/enum-values Material$MaterialDesc$FilterModeMin)
+            mag-options (protobuf/enum-values Material$MaterialDesc$FilterModeMag)]
+        [{:path [:wrap-u]
+          :localization-key (str localization-key ".wrap-u")
+          :type :choicebox
+          :options (protobuf-forms/make-options wrap-options)
+          :default (ffirst wrap-options)}
+         {:path [:wrap-v]
+          :localization-key (str localization-key ".wrap-v")
+          :type :choicebox
+          :options (protobuf-forms/make-options wrap-options)
+          :default (ffirst wrap-options)}
+         {:path [:wrap-w]
+          :localization-key (str localization-key ".wrap-w")
+          :type :choicebox
+          :options (protobuf-forms/make-options wrap-options)
+          :default (ffirst wrap-options)}
+         {:path [:filter-min]
+          :localization-key (str localization-key ".filter-min")
+          :type :choicebox
+          :options (protobuf-forms/make-options min-options)
+          :default (ffirst min-options)}
+         {:path [:filter-mag]
+          :localization-key (str localization-key ".filter-mag")
+          :type :choicebox
+          :options (protobuf-forms/make-options mag-options)
+          :default (ffirst mag-options)}
+         {:path [:max-anisotropy]
+          :localization-key (str localization-key ".max-anisotropy")
+          :type :number}])}]}})
+
+(defn- hack-downgrade-constant-value
+  "HACK/FIXME: The value field in MaterialDesc$Constant was changed from
+  `optional` to `repeated` in material. proto so that we can set uniform array
+  values in the runtime. However, we do not yet support editing of array values
+  in the material constant editing widget, and MaterialDesc$Constant is used for
+  both the runtime binary format and the material file format. For the time
+  being, we only read (and allow editing of) the first value from uniform
+  arrays. Since there is no way to add more uniform array entries from the
+  editor, it should be safe to do so until we can support uniform arrays fully."
+  [upgraded-constant-value]
+  (first upgraded-constant-value))
+
+(defn- hack-upgrade-constant-value
+  "HACK/FIXME: See above for the detailed background. We must convert the legacy
+  `optional` value to a `repeated` value when writing the runtime binary format."
+  [downgraded-constant-value]
+  [downgraded-constant-value])
+
+(defn editable-constant-type? [constant-type]
+  (case constant-type
+    :constant-type-user true
+    :constant-type-viewproj false
+    :constant-type-world false
+    :constant-type-texture false
+    :constant-type-view false
+    :constant-type-projection false
+    :constant-type-normal false
+    :constant-type-worldview false
+    :constant-type-worldviewproj false
+    :constant-type-time false
+    :constant-type-world-inverse false
+    :constant-type-view-inverse false
+    :constant-type-projection-inverse false
+    :constant-type-viewproj-inverse false
+    :constant-type-worldview-inverse false
+    :constant-type-worldviewproj-inverse false
+    :constant-type-user-matrix4 true
+    :constant-type-user-color true))
+
+(defn sanitize-constant [constant]
+  {:pre [(map? constant)]} ; Material$MaterialDesc$Constant in map format.
+  (if-not (editable-constant-type? (:type constant))
+    (dissoc constant :value)
+    (let [default-value (if (= :constant-type-user-matrix4 (:type constant))
+                          (vec (repeat 4 protobuf/vector4-zero))
+                          [protobuf/vector4-zero])]
+      (update constant :value #(or % default-value)))))
+
+(defn- constant->editable-constant [constant]
+  {:pre [(map? constant)]} ; Material$MaterialDesc$Constant in map format.
+  (let [constant-type (:type constant)]
+    (cond
+      (not (editable-constant-type? constant-type))
+      (assoc constant :value protobuf/vector4-zero)
+
+      (= :constant-type-user-matrix4 constant-type)
+      (protobuf/sanitize constant :value #(into [] cat (coll/resize % 4 protobuf/vector4-zero)))
+
+      :else
+      (protobuf/sanitize constant :value hack-downgrade-constant-value))))
+
+(defn- editable-constant->constant [constant]
+  {:pre [(map? constant)]} ; Material$MaterialDesc$Constant in map format.
+  (let [constant-type (:type constant)]
+    (cond
+      (not (editable-constant-type? constant-type))
+      (dissoc constant :value)
+
+      (= :constant-type-user-matrix4 constant-type)
+      (protobuf/sanitize constant :value #(into [] (partition-all 4) %))
+
+      :else
+      (protobuf/sanitize constant :value hack-upgrade-constant-value))))
+
+(defn coerce-constant [constant]
+  {:pre [(map? constant)]} ; Material$MaterialDesc$Constant in map format.
+  (update constant :value coll/resize
+          (if (= :constant-type-user-matrix4 (:type constant)) 16 4)
+          protobuf/float-zero))
+
+(def constants->editable-constants (partial mapv constant->editable-constant))
+
+(def editable-constants->constants (partial mapv editable-constant->constant))
+
+(def ^:private editable-sampler-optional-field-defaults
+  (-> Material$MaterialDesc$Sampler
+      (protobuf/optional-field-defaults)
+      (dissoc :name-hash :texture))) ; TODO: Support assigning a default :texture for Samplers.
+
+(defn sampler->editable-sampler [sampler]
+  (merge editable-sampler-optional-field-defaults sampler))
+
+(defn samplers->editable-samplers [samplers]
+  (mapv sampler->editable-sampler samplers))
+
+(defn editable-samplers->samplers [editable-samplers]
+  (mapv #(protobuf/clear-defaults Material$MaterialDesc$Sampler %)
+        editable-samplers))

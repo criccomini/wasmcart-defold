@@ -1,0 +1,3 @@
+animations {
+    animation: "/animationset/meshset_valid_gltf.gltf"
+}

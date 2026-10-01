@@ -1,0 +1,9 @@
+[bootstrap]
+main_collection = /main/main.collectionc
+
+[display]
+width = 960
+height = 640
+
+[project]
+title = trivial_extension

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox styleClass="diff-view" stylesheets="@editor.css" xmlns="http://javafx.com/javafx/8">
+   <HBox>
+      <Label id="left-file" styleClass="code-view-header" maxWidth="1.7976931348623157E308" text="Left file" HBox.hgrow="ALWAYS"/>
+      <Pane prefWidth="40.0"/>
+      <Label id="right-file" styleClass="code-view-header" maxWidth="1.7976931348623157E308" text="Right file" HBox.hgrow="ALWAYS"/>
+   </HBox>
+   <ScrollPane styleClass="edge-to-edge" fitToWidth="true" fitToHeight="true" hbarPolicy="NEVER" prefWidth="1024.0" prefHeight="768.0" VBox.vgrow="ALWAYS">
+      <HBox minHeight="-Infinity">
+         <Pane id="left" styleClass="code-view" HBox.hgrow="ALWAYS"/>
+         <Pane id="markers"/>
+         <Pane id="right" styleClass="code-view" HBox.hgrow="ALWAYS"/>
+      </HBox>
+   </ScrollPane>
+   <ScrollBar id="hscroll"/>
+</VBox>

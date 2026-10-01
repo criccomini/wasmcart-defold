@@ -1,0 +1,84 @@
+-- Copyright 2020-2026 The Defold Foundation
+-- Copyright 2014-2020 King
+-- Copyright 2009-2014 Ragnar Svensson, Christian Murray
+-- Licensed under the Defold License version 1.0 (the "License"); you may not use
+-- this file except in compliance with the License.
+--
+-- You may obtain a copy of the License, together with FAQs at
+-- https://www.defold.com/license
+--
+-- Unless required by applicable law or agreed to in writing, software distributed
+-- under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+-- CONDITIONS OF ANY KIND, either express or implied. See the License for the
+-- specific language governing permissions and limitations under the License.
+
+local test_duration = 3
+
+function init(self)
+    self.timer = test_duration
+    self.loading_proxy = "#loading_proxy"
+    self.test_proxies = {
+        "#sprite_proxy", "#particlefx_proxy",
+        "#collection_proxy_proxy", "#tile_proxy",
+        "#script_props_proxy", "#factory_proxy",
+        "#collectionfactory_proxy", "#physics_proxy",
+        "#gui_proxy", "#attacker_target_proxy",
+        "#identifiers_proxy", "#shared_state_proxy",
+        "#label_proxy", "#ray_cast_proxy",
+        "#collision_groups_proxy", "#collectionfactoryprops_proxy",
+        "#cross_collection_exists_proxy"
+	}
+    self.test_index = 1
+    msg.post(self.loading_proxy, "load")
+    self.proxies_unloaded = 0
+end
+
+function update(self, dt)
+    self.timer = self.timer - dt
+    if self.timer < 0 then
+        local error_code = -1
+        if self.started then
+            print("Test timed out while waiting for 'done' message from '" .. self.test_proxies[self.test_index] .. "'.")
+        else
+            print("Test timed out while waiting for 'start' message from '" .. self.loading_proxy .. "'.")
+        end
+        msg.post("@system:", "exit", { code = error_code })
+    end
+end
+
+local function activate_proxy(self, index)
+	print("Running tests in", self.test_proxies[index])
+    msg.post(self.test_proxies[index], "init")
+    msg.post(self.test_proxies[index], "enable")
+    self.timer = test_duration
+end
+
+local function deactivate_proxy(self, index)
+    local proxy = self.test_proxies[index]
+    msg.post(proxy, "disable")
+    msg.post(proxy, "final")
+    msg.post(proxy, "unload")
+end
+
+ --TODO: Rearrange this mess: Make sure each state is only started after the previous is unloaded!
+function on_message(self, message_id, message, sender)
+    if message_id == hash("proxy_loaded") then
+        msg.post(self.loading_proxy, "init")
+        msg.post(self.loading_proxy, "enable")
+        msg.post("test_loading:/loading#gui", "start", {proxies = self.test_proxies})
+    elseif message_id == hash("proxy_unloaded") then
+        self.proxies_unloaded = self.proxies_unloaded + 1
+        if self.proxies_unloaded == #self.test_proxies then
+            msg.post("@system:", "exit", { code = 0 })
+        end
+    elseif message_id == hash("start") then
+        self.started = true
+        activate_proxy(self, self.test_index)
+    elseif message_id == hash("done") then
+        deactivate_proxy(self, self.test_index)
+        self.test_index = self.test_index + 1
+        if self.test_index <= #self.test_proxies then
+            activate_proxy(self, self.test_index)
+        end
+    end
+end

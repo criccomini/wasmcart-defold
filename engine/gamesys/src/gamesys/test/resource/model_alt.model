@@ -1,0 +1,6 @@
+name: "valid"
+mesh: "/resource/meshset_valid_gltf.gltf"
+material: "/resource/resource_alt.material"
+textures: "/resource/tile_mario_tileset.png"
+animations: "/resource/meshset_valid_gltf.gltf"
+default_animation: ""

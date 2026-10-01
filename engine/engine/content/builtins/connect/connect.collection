@@ -1,0 +1,6 @@
+name: "reboot"
+instances {
+  id: "main"
+  prototype: "/builtins/connect/connect.go"
+}
+scale_along_z: 0

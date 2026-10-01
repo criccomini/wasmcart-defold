@@ -1,0 +1,2 @@
+script: "/gui/valid.gui_script"
+material: "/gui/material_local_vertexspace.material"

@@ -1,0 +1,379 @@
+;; Copyright 2020-2026 The Defold Foundation
+;; Copyright 2014-2020 King
+;; Copyright 2009-2014 Ragnar Svensson, Christian Murray
+;; Licensed under the Defold License version 1.0 (the "License"); you may not use
+;; this file except in compliance with the License.
+;;
+;; You may obtain a copy of the License, together with FAQs at
+;; https://www.defold.com/license
+;;
+;; Unless required by applicable law or agreed to in writing, software distributed
+;; under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+;; CONDITIONS OF ANY KIND, either express or implied. See the License for the
+;; specific language governing permissions and limitations under the License.
+
+(ns editor.types
+  (:require [dynamo.graph :as g]
+            [editor.pose]
+            [schema.core :as s]
+            [util.defonce :as defonce])
+  (:import [com.dynamo.graphics.proto Graphics$TextureImage$TextureFormat]
+           [editor.pose Pose]
+           [java.awt.image BufferedImage]
+           [java.nio ByteBuffer]
+           [javax.vecmath Matrix4d Point3d Quat4d Vector3d Vector4d]))
+
+(set! *warn-on-reflection* true)
+
+;; ----------------------------------------
+;; Protocols here help avoid circular dependencies
+;; ----------------------------------------
+
+(defprotocol R3Min
+  (min-p ^Point3d [this]))
+
+(defprotocol R3Max
+  (max-p ^Point3d [this]))
+
+(defprotocol Rotation
+  (rotation ^Quat4d [this]))
+
+(defprotocol Translation
+  (translation ^Vector4d [this]))
+
+(defprotocol Position
+  (position ^Point3d [this]))
+
+(defprotocol ImageHolder
+  (contents ^BufferedImage [this]))
+
+(defprotocol N2Extent
+  (width ^Integer [this])
+  (height ^Integer [this]))
+
+(defprotocol Frame
+  (frame [this] "Notified one frame after being altered."))
+
+(defprotocol PathManipulation
+  (^String           extension         [this]         "Returns the extension represented by this path.")
+  (^PathManipulation replace-extension [this new-ext] "Returns a new path with the desired extension.")
+  (^String           local-path        [this]         "Returns a string representation of the path and extension.")
+  (^String           local-name        [this]         "Returns the last segment of the path"))
+
+(defprotocol SATIntersection
+  (points [this] "Returns a seq of unique points in the geometry in Point3d form.")
+  (unique-edge-normals [this] "Returns a seq of unique non-parallel edge directions in the geometry in Vector3d form.")
+  (unique-face-normals [this] "Returns a seq of unique non-parallel face normals in the geometry in Vector3d form."))
+
+;;; ----------------------------------------
+;;; Functions to create basic value types
+;;; ----------------------------------------
+
+(def TInt32 (s/both s/Int (s/pred #(< Integer/MIN_VALUE % Integer/MAX_VALUE) 'int32?)))
+(def TFloat32 (s/pred #(instance? Float %) "float"))
+(def TNodeID (s/named s/Int "node-id"))
+
+(g/deftype Icon    s/Str)
+
+(g/deftype Color   [s/Num])
+
+(g/deftype Vec2    [(s/one s/Num "x")
+                    (s/one s/Num "y")])
+
+(g/deftype Vec3    [(s/one s/Num "x")
+                    (s/one s/Num "y")
+                    (s/one s/Num "z")])
+
+(g/deftype Vec4    [(s/one s/Num "x")
+                    (s/one s/Num "y")
+                    (s/one s/Num "z")
+                    (s/one s/Num "w")])
+
+(g/deftype Mat2 [(s/one s/Num "m00") (s/one s/Num "m01")
+                 (s/one s/Num "m10") (s/one s/Num "m11")])
+
+(g/deftype Mat3 [(s/one s/Num "m00") (s/one s/Num "m01") (s/one s/Num "m02")
+                 (s/one s/Num "m10") (s/one s/Num "m11") (s/one s/Num "m12")
+                 (s/one s/Num "m20") (s/one s/Num "m21") (s/one s/Num "m22")])
+
+(g/deftype Mat4 [(s/one s/Num "m00") (s/one s/Num "m01") (s/one s/Num "m02") (s/one s/Num "m03")
+                 (s/one s/Num "m10") (s/one s/Num "m11") (s/one s/Num "m12") (s/one s/Num "m13")
+                 (s/one s/Num "m20") (s/one s/Num "m21") (s/one s/Num "m22") (s/one s/Num "m23")
+                 (s/one s/Num "m30") (s/one s/Num "m31") (s/one s/Num "m32") (s/one s/Num "m33")])
+
+(def TLines [s/Str])
+(g/deftype Lines TLines)
+
+(defn Point3d->Vec3 [^Point3d p]
+  [(.getX p) (.getY p) (.getZ p)])
+
+(def Registry {s/Any s/Any})
+
+(defonce/record Rect [path ^long x ^long y ^long width ^long height]
+  N2Extent
+  (width [this] width)
+  (height [this] height))
+
+(defn Rect->Vector3d
+  ^Vector3d [^Rect rect]
+  (Vector3d. (.x rect) (.y rect) 0.0))
+
+(defn Rect->Point3d
+  ^Point3d [^Rect rect]
+  (Point3d. (.x rect) (.y rect) 0.0))
+
+(def ^:private aabb-unique-axes
+  [(Vector3d. 1.0 0.0 0.0)
+   (Vector3d. 0.0 1.0 0.0)
+   (Vector3d. 0.0 0.0 1.0)])
+
+(s/defrecord AABB
+  [min :- Point3d
+   max :- Point3d]
+
+  R3Min
+  (min-p [this] (.min this))
+
+  R3Max
+  (max-p [this] (.max this))
+
+  SATIntersection
+  (points [_this]
+    (let [min-x (.x min)
+          min-y (.y min)
+          min-z (.z min)
+          max-x (.x max)
+          max-y (.y max)
+          max-z (.z max)]
+      [(Point3d. min-x min-y min-z)
+       (Point3d. max-x min-y min-z)
+       (Point3d. min-x max-y min-z)
+       (Point3d. max-x max-y min-z)
+       (Point3d. min-x min-y max-z)
+       (Point3d. max-x min-y max-z)
+       (Point3d. min-x max-y max-z)
+       (Point3d. max-x max-y max-z)]))
+  (unique-edge-normals [_this] aabb-unique-axes)
+  (unique-face-normals [_this] aabb-unique-axes))
+
+(s/defrecord FrustumCorners
+  ;; NOTE: Counter-clockwise winding order.
+  [near-tl :- Point3d
+   near-bl :- Point3d
+   near-br :- Point3d
+   near-tr :- Point3d
+   far-tl :- Point3d
+   far-bl :- Point3d
+   far-br :- Point3d
+   far-tr :- Point3d])
+
+(s/defrecord FrustumPlanes
+  ;; Infinite planes, (x, y, z) outward normal,
+  ;; w negative distance from origin along normal.
+  [near :- Vector4d
+   far :- Vector4d
+   top :- Vector4d
+   right :- Vector4d
+   bottom :- Vector4d
+   left :- Vector4d])
+
+(s/defrecord Frustum
+  [corners :- FrustumCorners
+   planes :- FrustumPlanes
+   unique-edge-normals :- [Vector3d]
+   unique-face-normals :- [Vector3d]]
+
+  SATIntersection
+  (points [this] (vals corners))
+  (unique-edge-normals [this] unique-edge-normals)
+  (unique-face-normals [this] unique-face-normals))
+
+(defmethod print-method AABB
+  [^AABB v ^java.io.Writer w]
+  (.write w (str "<AABB \"min: " (.min v) ", max: " (.max v) "\">")))
+
+(s/defn ^:always-validate rect :- Rect
+  ([x :- s/Num y :- s/Num width :- s/Num height :- s/Num]
+    (rect "" (int  x) (int y) (int width) (int height)))
+  ([path :- s/Any x :- s/Num y :- s/Num width :- s/Num height :- s/Num]
+    (Rect. path (int x) (int y) (int width) (int height))))
+
+(def ^:private sprite-trim-modes
+  (s/enum :sprite-trim-mode-off
+          :sprite-trim-mode-4
+          :sprite-trim-mode-5
+          :sprite-trim-mode-6
+          :sprite-trim-mode-7
+          :sprite-trim-mode-8
+          :sprite-trim-polygons))
+
+(s/defrecord Image
+  [path     :- s/Any
+   contents :- (s/maybe BufferedImage)
+   width    :- TInt32
+   height   :- TInt32
+   pivot-x  :- TFloat32
+   pivot-y  :- TFloat32
+   sprite-trim-mode :- sprite-trim-modes]
+  ImageHolder
+  (contents [this] contents))
+
+(def ^:private playback-modes (s/enum :playback-none :playback-once-forward :playback-once-backward
+                                     :playback-once-pingpong :playback-loop-forward :playback-loop-backward
+                                     :playback-loop-pingpong))
+(g/deftype AnimationPlayback playback-modes)
+
+(s/defrecord Animation
+  [id              :- s/Str
+   images          :- [Image]
+   fps             :- TInt32
+   flip-horizontal :- s/Bool
+   flip-vertical   :- s/Bool
+   playback        :- playback-modes])
+
+(s/defrecord TexturePacking
+  [aabb         :- Rect
+   packed-image :- BufferedImage
+   coords       :- [Rect]
+   sources      :- [Rect]
+   animations   :- [Animation]])
+
+(s/defrecord Vertices
+  [counts   :- [TInt32]
+   starts   :- [TInt32]
+   vertices :- [s/Num]])
+
+(s/defrecord EngineFormatTexture
+  [width           :- TInt32
+   height          :- TInt32
+   original-width  :- TInt32
+   original-height :- TInt32
+   format          :- Graphics$TextureImage$TextureFormat
+   data            :- ByteBuffer
+   mipmap-sizes    :- [TInt32]
+   mipmap-offsets  :- [TInt32]])
+
+(s/defrecord TextureSetAnimationFrame
+  [image                :- Image ; TODO: is this necessary?
+   vertex-start         :- s/Num
+   vertex-count         :- s/Num
+   outline-vertex-start :- s/Num
+   outline-vertex-count :- s/Num
+   tex-coords-start     :- s/Num
+   tex-coords-count     :- s/Num])
+
+(s/defrecord TextureSetAnimation
+  [id              :- s/Str
+   width           :- TInt32
+   height          :- TInt32
+   fps             :- TInt32
+   flip-horizontal :- s/Int
+   flip-vertical   :- s/Int
+   playback        :- playback-modes
+   frames          :- [TextureSetAnimationFrame]])
+
+(s/defrecord TextureSet
+  [animations       :- {s/Str TextureSetAnimation}
+   vertices         :- s/Any #_editor.gl.vertex/PersistentVertexBuffer
+   outline-vertices :- s/Any #_editor.gl.vertex/PersistentVertexBuffer
+   tex-coords       :- s/Any #_editor.gl.vertex/PersistentVertexBuffer])
+
+(defprotocol Pass
+  (selection?       [this])
+  (model-transform? [this])
+  (depth-clipping? [this]))
+
+(defprotocol Area
+  (dimensions [this])
+  (empty-space? [this]))
+
+(defonce/record Region [^double left ^double right ^double top ^double bottom]
+  Area
+  (dimensions [this]
+    [(- (.right this) (.left this))
+     (- (.bottom this) (.top this))])
+  (empty-space? [this]
+    (or (<= (.right this) (.left this))
+        (<= (.bottom this) (.top this)))))
+
+(defonce/record Camera
+  [type ;; :perspective or :orthographic
+   ^Point3d position
+   ^Quat4d rotation
+   ^double z-near
+   ^double z-far
+   ^double fov-x
+   ^double fov-y
+   ^Vector4d focus-point
+   ^double focus-distance
+   filter-fn]
+  Position
+  (position [this] position)
+  Rotation
+  (rotation [this] rotation))
+
+(g/deftype OutlineCommand
+    {:label      (s/maybe s/Str)
+     :enabled    (s/maybe  s/Bool)
+     :command-fn (s/maybe  s/Any)
+     :context    (s/maybe  s/Any)})
+
+(g/deftype OutlineItem
+    {:label    (s/maybe s/Str)
+     :icon     (s/maybe Icon)
+     :node-ref (s/maybe Long)
+     :commands [(s/maybe (:schema @OutlineCommand))]
+     :children [(s/maybe s/Any)]})
+
+(defprotocol GeomCloud
+  (geom-aabbs [this] [this ids])
+  (geom-insert [this positions])
+  (geom-delete [this ids])
+  (geom-update [this ids f])
+  (geom-transform [this ids ^Matrix4d transform]))
+
+(defn node-outline-key-path? [value]
+  (and (vector? value)
+       (let [[resource-node & outline-node-names] value]
+         (and (integer? resource-node)
+              (every? string? outline-node-names)))))
+
+(g/deftype NodeOutlineKeyPaths #{(s/pred node-outline-key-path?)})
+(g/deftype RenderableTags #{s/Keyword})
+
+;; SDK api
+(def TSceneRenderable
+  {:passes [(s/protocol Pass)]
+   (s/optional-key :batch-key) s/Any
+   (s/optional-key :preview-fn) (s/pred fn?)
+   (s/optional-key :render-fn) (s/pred fn?)
+   (s/optional-key :select-batch-key) s/Any
+   (s/optional-key :tags) #{s/Keyword}
+   (s/optional-key :topmost?) s/Bool
+   (s/optional-key :user-data) s/Any
+   s/Keyword s/Any})
+
+;; SDK api
+(def TSceneUpdatable
+  {:update-fn (s/pred fn?)
+   (s/optional-key :initial-state) s/Any
+   (s/optional-key :name) s/Str
+   (s/optional-key :node-id) TNodeID
+   s/Keyword s/Any})
+
+;; SDK api
+(def TScene
+  {(s/optional-key :aabb) AABB
+   (s/optional-key :children) [(s/recursive #'TScene)]
+   (s/optional-key :info-text) s/Str
+   (s/optional-key :node-id) TNodeID
+   (s/optional-key :pose) Pose
+   (s/optional-key :renderable) TSceneRenderable
+   (s/optional-key :updatable) (s/maybe TSceneUpdatable)
+   s/Keyword s/Any})
+
+;; SDK api
+(g/deftype SceneRenderable TSceneRenderable)
+(g/deftype SceneUpdatable TSceneUpdatable)
+(g/deftype Scene TScene)
+(g/deftype SceneVec [TScene])

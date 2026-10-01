@@ -1,0 +1,25 @@
+#center-split {
+    -fx-padding: 0;
+
+    #scroll-pane > .viewport,
+    .cljfx-form-contents-scroll-pane > .viewport,
+    .md-page-scroll-pane > .viewport {
+        -fx-background-color: -df-background-light;
+    }
+
+    .viewport {
+
+        .button {
+            -fx-min-width: 20px;
+            /*-fx-min-height: 10px;*/
+            -fx-background-color: -df-background;
+            -fx-border-radius: 0;
+            -fx-border-width: 0;
+            -fx-border-color: transparent;
+        }
+    }
+
+    .split-pane-divider {
+        -fx-padding: 0 5 !important;
+    }
+}

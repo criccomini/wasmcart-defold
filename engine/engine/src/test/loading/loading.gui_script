@@ -1,0 +1,52 @@
+-- Copyright 2020-2026 The Defold Foundation
+-- Copyright 2014-2020 King
+-- Copyright 2009-2014 Ragnar Svensson, Christian Murray
+-- Licensed under the Defold License version 1.0 (the "License"); you may not use
+-- this file except in compliance with the License.
+--
+-- You may obtain a copy of the License, together with FAQs at
+-- https://www.defold.com/license
+--
+-- Unless required by applicable law or agreed to in writing, software distributed
+-- under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+-- CONDITIONS OF ANY KIND, either express or implied. See the License for the
+-- specific language governing permissions and limitations under the License.
+
+local function on_fade_in(self, n)
+    for k,v in pairs(self.proxies) do
+        msg.post("main:/main" .. v, "load")
+    end
+end
+
+local function on_fade_out(self, n)
+    msg.post("main:/main#loading_proxy", "disable")
+    msg.post("main:/main#loading_proxy", "final")
+    msg.post("main:/main#script", "start")
+end
+
+local function start(self)
+    self.loading_node = gui.get_node("loading")
+    local color = gui.get_color(self.loading_node)
+    gui.set_color(self.loading_node, vmath.vector4(color.x, color.y, color.z, 0))
+    gui.animate(self.loading_node, gui.PROP_COLOR, color, gui.EASING_OUT, 0.5, 0.0, on_fade_in)
+end
+
+function init(self)
+    self.loaded_proxies = 0
+end
+
+function final(self)
+    msg.post("main:/main#loading_proxy", "unload")
+end
+
+function on_message(self, message_id, message, sender)
+    if message_id == hash("start") then
+        self.proxies = message.proxies
+        start(self)
+    elseif message_id == hash("proxy_loaded") then
+        self.loaded_proxies = self.loaded_proxies + 1
+        if self.loaded_proxies == #self.proxies then
+            gui.animate(self.loading_node, gui.PROP_COLOR, vmath.vector4(1, 1, 1, 0), gui.EASING_OUT, 0.5, 0.0, on_fade_out)
+        end
+    end
+end

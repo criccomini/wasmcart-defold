@@ -1,0 +1,8 @@
+mesh: "/builtins/assets/gltf/cube.gltf"
+material: "/builtins/materials/model.material"
+textures: "/referenced/images/red.png"
+textures: "/referenced/images/green.png"
+skeleton: "/builtins/assets/gltf/cube.gltf"
+animations: "/builtins/assets/gltf/cube.gltf"
+default_animation: "cube"
+name: "legacy_material_and_textures"

@@ -1,0 +1,123 @@
+syntax = "proto2";
+package dmRenderDDF;
+
+import "ddf/ddf_extensions.proto";
+
+option java_package = "com.dynamo.render.proto";
+option java_outer_classname = "Font";
+
+// Public API
+enum FontTextureFormat
+{
+    TYPE_BITMAP          = 0 [(displayName) = "Bitmap"];
+    TYPE_DISTANCE_FIELD  = 1 [(displayName) = "Distance Field"];
+}
+
+// Public API
+enum FontRenderMode
+{
+    MODE_SINGLE_LAYER = 0 [(displayName) = "Single Layer"];
+    MODE_MULTI_LAYER  = 1 [(displayName) = "Multi Layer"];
+}
+
+// Authored style definitions use opening-only rich-text markup. The reserved
+// default entry has no markup; its values are generated from FontDesc.
+message StyleDesc
+{
+    required string name = 1;
+    optional string markup = 2;
+}
+
+message StyleEffect
+{
+    enum Type { GRADIENT = 0; WAVE = 1; SHAKE = 2; }
+    required Type type = 1;
+    optional uint32 fit = 2;
+    optional float hz = 3;
+    optional float amplitude = 4;
+    optional float wavelength = 5;
+    optional uint32 gradient_mode = 6;
+    repeated float colors = 7; // BL, BR, TL, TR RGBA
+}
+
+// Typed, platform-independent render data. Flags identify explicitly authored
+// properties; separate alpha values allow inheriting the component's RGB.
+message CompiledStyle
+{
+    required string name = 1;
+    required uint64 name_hash = 2;
+    optional uint32 flags = 3;
+    repeated float face_color = 4;
+    repeated float outline_color = 5;
+    repeated float shadow_color = 6;
+    optional float outline_width = 7;
+    optional float shadow_x = 8;
+    optional float shadow_y = 9;
+    optional float shadow_blur = 10;
+    optional float outline_alpha = 11 [default = 1.0];
+    optional float shadow_alpha = 12 [default = 1.0];
+    optional uint32 decoration_flags = 13;
+    optional uint32 underline_pattern = 14;
+    optional uint32 strike_pattern = 15;
+    repeated StyleEffect effects = 16;
+}
+
+// Source format only
+message FontDesc
+{
+    required string font = 1 [(resource)=true];
+    required string material = 2 [(resource)=true];
+    required uint32 size = 3;
+    optional uint32 antialias = 4 [default = 1];
+    optional float alpha = 5 [default = 1.0];
+    optional float outline_alpha = 6 [default = 0.0];
+    optional float outline_width = 7 [default = 0.0];
+    optional float shadow_alpha = 8 [default = 0.0];
+    optional uint32 shadow_blur = 9 [default = 0];
+    optional float shadow_x = 10 [default = 0.0];
+    optional float shadow_y = 11 [default = 0.0];
+    optional string extra_characters = 12 [default = ""]; // Deprecated
+    optional FontTextureFormat output_format = 13 [default = TYPE_BITMAP];
+
+    optional bool all_chars = 14 [default = false];
+    optional uint32 cache_width = 15 [default = 0];
+    optional uint32 cache_height = 16 [default = 0];
+    optional FontRenderMode render_mode = 17 [default = MODE_SINGLE_LAYER];
+    optional string characters = 18 [default = ""];
+    repeated StyleDesc styles = 19;
+}
+
+// Used at runtime.
+message FontMap
+{
+    optional string material      = 1 [default = "", (resource)=true];
+    optional string glyph_bank    = 2 [default = "", (resource)=true];
+    optional string font          = 3 [default = "", (resource)=true];
+
+    optional uint32 size          = 4 [default = 0];
+    optional uint32 antialias     = 5 [default = 1];
+    optional float  shadow_x      = 6 [default = 0.0];
+    optional float  shadow_y      = 7 [default = 0.0];
+    optional uint32 shadow_blur   = 8 [default = 0];
+    optional float  shadow_alpha  = 9 [default = 1.0];
+    optional float  alpha         = 10 [default = 1.0];
+    optional float  outline_alpha = 11 [default = 1.0];
+    optional float  outline_width = 12 [default = 0.0];
+    optional uint32 layer_mask    = 13 [default = 1];
+
+    optional FontTextureFormat output_format = 14 [default = TYPE_BITMAP];
+    optional FontRenderMode render_mode      = 15 [default = MODE_SINGLE_LAYER];
+
+    optional bool all_chars       = 16 [default = false]; // 0x000000 - 0x10FFFF
+    optional string characters    = 17 [default = ""];
+
+    // If zero, it'll grow dynamically to our max size (2k x 4k)
+    optional uint32 cache_width   = 18 [default = 0];
+    optional uint32 cache_height  = 19 [default = 0];
+
+    optional float sdf_spread     = 20 [default = 1.0];
+    optional float sdf_outline    = 21 [default = 0.0];
+    optional float sdf_shadow     = 22 [default = 0.0];
+    optional uint32 padding       = 23 [default = 0];
+    repeated CompiledStyle styles = 24;
+}

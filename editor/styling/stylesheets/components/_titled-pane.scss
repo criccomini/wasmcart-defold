@@ -1,0 +1,28 @@
+.titled-pane {
+    -fx-background-color: -df-background-light;
+    -fx-border: 0;
+    -fx-padding: 0;
+    -fx-text-fill: -df-text;
+
+    .list-view {
+        -fx-background-insets: 0;
+        -fx-border-width: 0;
+    }
+
+    > .title {
+        -fx-background-color: -df-background-light;
+        -fx-background-insets: 0;
+        -fx-background-radius: 0;
+        -fx-padding: 11 0 12 15;
+        -fx-border-width: 0;
+    }
+
+    > .content {
+        -fx-border-width: 0;
+    }
+    .content {
+        AnchorPane {
+            -fx-padding: 0em;
+        }
+    }
+}

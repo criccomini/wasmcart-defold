@@ -1,0 +1,144 @@
+.button {
+  -fx-background-radius: 5;
+  -fx-border-radius: 4;
+  -fx-padding: 4px 17px;
+  -fx-min-width: 100px;
+  -fx-background-color: -df-component-dark;
+  -fx-background-insets: 0;
+  -fx-border-color: -df-component-darker;
+  -fx-border-width: 1;
+  -fx-text-fill: -df-text;
+  >.icon-graphic {
+    -fx-background-color: -df-text;
+  }
+
+  &:hover {
+    -fx-background-color: -df-component-lighter;
+    -fx-text-fill: -df-text-selected;
+    >.icon-graphic {
+      -fx-background-color: -df-text-selected;
+    }
+  }
+  &:armed {
+    -fx-background-color: -df-component-light;
+    -fx-text-fill: -df-text-selected;
+    >.icon-graphic {
+      -fx-background-color: -df-text-selected;
+    }
+  }
+  &.low-prio {
+    -fx-font-weight: normal;
+    -fx-background-color: -df-component-darker;
+    -fx-border-color: -df-background-lighter;
+    -fx-text-fill: -df-text-dark;
+    >.icon-graphic {
+      -fx-background-color: -df-text-dark;
+    }
+  }
+  &.low-prio:hover {
+    -fx-background-color: -df-component-light;
+    -fx-text-fill: -df-text;
+    >.icon-graphic {
+      -fx-background-color: -df-text;
+    }
+  }
+  &.low-prio:armed {
+    -fx-background-color: -df-component-dark;
+    -fx-border-color: -df-text-dark;
+    -fx-text-fill: -df-text;
+    >.icon-graphic {
+      -fx-background-color: -df-text;
+    }
+  }
+}
+
+.button-icon {
+  @extend .button;
+  -fx-padding: 0;
+  -fx-min-width: 0;
+  -fx-min-height: 0;
+}
+
+.button-small {
+  @extend .button;
+  -fx-padding: 2px 8px;
+  -fx-min-width: 0px;
+}
+
+.button-large {
+  @extend .button;
+  -fx-padding: 10px 25px;
+  -fx-min-width: 200px;
+}
+
+.toggle-button, .embedded-properties-button {
+  -fx-background-radius: 4px;
+  -fx-border-radius: 4px;
+  -fx-padding: 4px;
+  -fx-background-insets: 0px;
+  -fx-border-insets: 0px;
+  -fx-background-color: -df-component-dark;
+  &:hover {
+    -fx-background-color: -df-component-lighter;
+  }
+  &:selected {
+    -fx-background-color: -df-component-light;
+    & > .image-view {
+      @include effect-lighten-blue()
+    }
+  }
+  &:armed {
+    -fx-background-color: -df-component-light;
+  }
+}
+
+.toggle-button,
+.color-picker.split-button > .color-picker-label {
+  -fx-background-color: -df-component-dark;
+  -fx-background-insets: 0;
+  -fx-background-radius: 4;
+  -fx-border-width: 1;
+  -fx-border-radius: 4;
+  -fx-border-color: -df-component-darker;
+  -fx-text-fill: -fx-text-base-color;
+}
+
+/* for styling checkboxes as (O ) ( O) control */
+.slide-switch {
+  -fx-padding: 2px;
+  -fx-border-width: 0px;
+  > .box  {
+    -fx-pref-width: 20px;
+    -fx-pref-height: 12px;
+    -fx-padding: 1px;
+    -fx-background-radius: 10px;
+    -fx-border-width: 0px;
+    -fx-alignment: center-left;
+    -fx-background-color: -df-background;
+    > .mark {
+      -fx-max-width: 10px;
+      -fx-background-insets: 0px;
+      -fx-background-color: -df-component-light;
+      -fx-background-radius: 10px;
+      -fx-shape: none;
+    }
+  }
+
+  &:selected {
+    > .box {
+      -fx-alignment: center-right;
+      > .mark {
+        -fx-background-color: -df-defold-blue;
+      }
+    }
+  }
+
+  &:disabled {
+    -fx-opacity: 50%;
+  }
+}
+
+.color-picker.split-button > .arrow-button:hover,
+.color-picker.split-button > .color-picker-label:hover {
+  -fx-background-color: -df-background-lighter;
+  -fx-text-fill: -fx-text-base-color; }

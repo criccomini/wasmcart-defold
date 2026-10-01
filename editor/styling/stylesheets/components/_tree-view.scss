@@ -1,0 +1,54 @@
+.tree-view {
+    -fx-background-color: -df-background-light;
+    -fx-background-insets: 0;
+}
+
+.tree-cell {
+    -fx-background-color: -df-background-light;
+    -fx-font-weight: normal;
+    .label {
+        -fx-padding: 0;
+    }
+    &:filled {
+        -fx-padding: 3;
+        -fx-border-width: 0 0 0 2;
+        -fx-background-insets: 0 0 0 0;
+        -fx-border-color: transparent;
+        -fx-text-fill: -df-text;
+
+        &:hover {
+            -fx-text-fill: -df-text-selected;
+            & > .image-view {
+                @include effect-bright-grey();
+            }
+            .label {
+                -fx-text-fill: -df-text-selected;
+            }
+        }
+        &:selected {
+            -fx-border-width: 0 0 0 2;
+            -fx-border-color: -df-defold-orange;
+            -fx-text-fill: -df-text-selected;
+            -fx-background-color: -df-background-lighter;
+            & > .image-view {
+                @include effect-bright-grey();
+            }
+            .label {
+                -fx-text-fill: -df-text-selected;
+            }
+        }
+
+        & > .image-view {
+            @include effect-icon-grey();
+        }
+
+        .tree-disclosure-node {
+            .arrow {
+                @include effect-bright-grey();
+            }
+        }
+
+        // Generate css for file extensions
+        @include extensions(tree);
+    }
+}

@@ -1,0 +1,174 @@
+;; Copyright 2020-2026 The Defold Foundation
+;; Copyright 2014-2020 King
+;; Copyright 2009-2014 Ragnar Svensson, Christian Murray
+;; Licensed under the Defold License version 1.0 (the "License"); you may not use
+;; this file except in compliance with the License.
+;;
+;; You may obtain a copy of the License, together with FAQs at
+;; https://www.defold.com/license
+;;
+;; Unless required by applicable law or agreed to in writing, software distributed
+;; under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+;; CONDITIONS OF ANY KIND, either express or implied. See the License for the
+;; specific language governing permissions and limitations under the License.
+
+(ns integration.undo-test
+  (:require [clojure.test :refer :all]
+            [clojure.walk :as walk]
+            [dynamo.graph :as g]
+            [editor.app-view :as app-view]
+            [editor.localization :as localization]
+            [editor.outline :as outline]
+            [integration.test-util :as test-util]))
+
+(deftest undo-unseq-tx-does-not-coalesce
+  (testing "Undoing in unsequenced transactions does not coalesce"
+    (test-util/with-loaded-project
+      (let [atlas-node (test-util/resource-node project "/switcher/fish.atlas")]
+        (g/transact
+          (concat
+            (g/operation-sequence (gensym))
+            (g/set-property atlas-node :margin 1)))
+        (g/transact (g/set-property atlas-node :margin 10))
+        (g/transact (g/set-property atlas-node :margin 2))
+        (g/undo! :undo/global)
+        (is (= 10 (g/node-value atlas-node :margin)))))))
+
+(defn outline-children [node-id] (:children (g/node-value node-id :node-outline)))
+
+(deftest redo-undone-deletion-still-deletes
+ (test-util/with-loaded-project
+   (let [proj-graph (g/node-id->graph-id project)
+         go-node    (test-util/resource-node project "/switcher/test.go")]
+     (is (= 1 (count (outline-children go-node))))
+
+     (g/transact (g/delete-node (:node-id (first (outline-children go-node)))))
+
+     (is (= 0 (count (outline-children go-node))))
+
+     ;; undo deletion
+     (g/undo! :undo/global)
+     (is (= 1 (count (outline-children go-node))))
+
+     ;; redo deletion
+     (g/redo! :undo/global)
+
+     (is (= 0 (count (outline-children go-node)))))))
+
+(g/defnode DummyComponent
+  (inherits outline/OutlineNode)
+  (output node-outline outline/OutlineData (g/fnk [_node-id]
+                                             {:node-id _node-id
+                                              :node-outline-key "dummy"
+                                              :label "dummy"
+                                              :icon ""
+                                              :children []})))
+
+(g/defnode OutlineViewSimulator
+  (input outline g/Any)
+
+  (property counter g/Any)
+
+  (output outline g/Any :cached
+          (g/fnk [counter outline]
+            (swap! counter inc)
+            outline)))
+
+(defn- make-outline-view-simulator! [view-graph]
+  (first
+    (g/tx-nodes-added
+      (g/transact
+        {:undoable false}
+        (g/make-node view-graph OutlineViewSimulator :counter (atom 0))))))
+
+(defn remove-fns
+  "Dynamic functions are never equal. Strip them out of the outline"
+  [outline]
+  (let [fns #{:handler-fn :child-reqs}]
+    (walk/postwalk
+      (fn [form]
+        (if-not (and (vector? form) (fns (first form)))
+          form))
+      outline)))
+
+(defn- add-component! [project go-node-id select-fn]
+  (let [op-seq     (gensym)
+        proj-graph (g/node-id->graph-id project)
+        component  (first
+                    (g/tx-nodes-added
+                     (g/transact
+                      (concat
+                       (g/operation-label (localization/message "operation.game-object.add-component"))
+                       (g/operation-sequence op-seq)
+                       (g/make-nodes proj-graph
+                                     [comp-node DummyComponent]
+                                     (g/connect comp-node :node-outline go-node-id :child-outlines))))))]
+    (g/transact
+     (concat
+      (g/operation-sequence op-seq)
+      (g/operation-label (localization/message "operation.game-object.add-component"))
+      (select-fn [component])))
+    component))
+
+(deftest undo-redo-undo-redo
+ (test-util/with-loaded-project
+   (let [proj-graph (g/node-id->graph-id project)
+         view-graph (g/node-id->graph-id app-view)
+         go-node    (test-util/resource-node project "/switcher/test.go")
+         outline-id (make-outline-view-simulator! view-graph)
+         component  (add-component! project go-node (fn [node-ids] (app-view/select app-view node-ids)))]
+
+     (g/transact (g/connect go-node :node-outline outline-id :outline))
+
+     (let [original-outline (remove-fns (g/node-value outline-id :outline))]
+       (g/reset-undo! :undo/global)
+
+       ;; delete the component
+       (g/transact
+         [(g/operation-label (localization/message "operation.delete"))
+          (g/delete-node component)])
+
+       ;; force :outline to be cached
+       (let [outline-without-component (remove-fns (g/node-value outline-id :outline))]
+
+         ;; undo the deletion (component is back)
+         (g/undo! :undo/global)
+
+         ;; same :outline should be re-produced
+         (let [outline-after-undo (remove-fns (g/node-value outline-id :outline))]
+           (is (= original-outline outline-after-undo)))
+
+         ;; redo the deletion (component is gone)
+         (g/redo! :undo/global)
+
+         ;; :outline should be re-produced again
+         (is (= outline-without-component (remove-fns (g/node-value outline-id :outline))))
+
+         ;; undo the deletion again (component is back again)
+         (g/undo! :undo/global)
+
+         ;; :outline should be re-produced
+         (let [outline-after-second-undo (remove-fns (g/node-value outline-id :outline))]
+           (is (= original-outline outline-after-second-undo)))
+
+         ;; redo the deletion yet again (component is gone again)
+         (g/redo! :undo/global)
+
+         ;; :outline should be re-produced yet again
+         (is (= outline-without-component (remove-fns (g/node-value outline-id :outline)))))))))
+
+(defn- child-count [outline-id]
+  (count (:children (g/node-value outline-id :outline))))
+
+(deftest add-undo-updated-outline
+ (test-util/with-loaded-project
+   (let [proj-graph (g/node-id->graph-id project)
+         view-graph (g/node-id->graph-id app-view)
+         go-node    (test-util/resource-node project "/switcher/test.go")
+         outline-id (make-outline-view-simulator! view-graph)]
+     (g/transact (g/connect go-node :node-outline outline-id :outline))
+     (is (= 1 (child-count outline-id)))
+     (let [component (add-component! project go-node (fn [node-ids] (app-view/select app-view node-ids)))]
+       (is (= 2 (child-count outline-id)))
+       (g/undo! :undo/global)
+       (is (= 1 (child-count outline-id)))))))

@@ -1,0 +1,145 @@
+/* Outline panel */
+
+@mixin colorize-icon($color, $active-color) {
+  &:filled {
+    > .anchor-pane > .h-box > .image-view {
+      -fx-effect: innershadow(gaussian, $color, 20, 1.0, 0, 0);
+    }
+
+    &:hover {
+      > .anchor-pane > .h-box > .image-view {
+        -fx-effect: innershadow(gaussian, $active-color, 20, 1.0, 0, 0);
+      }
+    }
+
+    &:selected {
+      > .anchor-pane > .h-box > .image-view {
+        -fx-effect: innershadow(gaussian, $active-color, 20, 1.0, 0, 0);
+      }
+    }
+  }
+}
+
+@mixin colorize-label($color, $active-color) {
+  &:filled {
+    -fx-text-fill: $color;
+
+    &:hover,
+    &:selected {
+      -fx-text-fill: $active-color;
+    }
+  }
+}
+
+@mixin colorize-disclosure-arrow($color) {
+  &:filled {
+    .tree-disclosure-node {
+      .arrow {
+        -fx-effect: innershadow(gaussian, $color, 20, 1.0, 0, 0);
+      }
+    }
+  }
+}
+
+#outline {
+  .tree-cell {
+    @include colorize-icon(-df-text-dark, -df-text);
+
+    -fx-padding: 3px 0 3px 3px; 
+
+    &.reference,
+    &.parent-reference {
+      .text {
+        -fx-font-style: italic;
+      }
+    }
+
+    &.overridden {
+      @include colorize-icon(-df-defold-blue, -df-defold-blue-light);
+      @include colorize-label(-df-defold-blue, -df-defold-blue-light);
+    }
+
+    &.child-overridden {
+      @include colorize-disclosure-arrow(-df-defold-blue-light);
+    }
+
+    &.error {
+      // NOTE: Icon image also changes to the error icon.
+      @include colorize-icon(-df-error-severity-fatal-dim, -df-error-severity-fatal);
+    }
+
+    &.child-error {
+      @include colorize-disclosure-arrow(-df-error-severity-fatal-dim);
+    }
+
+    > .anchor-pane > .h-box > .image-view {
+      -fx-fit-height: 16px;
+      -fx-fit-width: 16px;
+    } 
+
+    .anchor-pane {
+      -fx-background-color: transparent;
+    }
+
+    .h-box {
+      -fx-padding: 0 22px 0 0;
+    }
+
+    .visibility-toggle {
+      visibility: hidden;
+      -fx-padding: 0 4px;
+      -fx-background-color: -df-background-light;
+      -fx-border-width: 0;
+      -fx-min-height: 16px;
+
+      SVGPath {
+        -fx-fill: -df-text-dark;
+      }
+
+      &:hover {
+        SVGPath {
+          -fx-fill: -df-text-light;
+        }
+      }
+    }
+
+    &:selected {
+      .visibility-toggle {
+        -fx-background-color: -df-background-lighter;
+      }
+    }
+
+    &.hidden-parent {
+      .tree-disclosure-node {
+        .arrow {
+          -fx-opacity: 40%;
+        }
+      }
+      > .anchor-pane > .h-box > .image-view {
+        -fx-opacity: 40%;
+      }
+      .text {
+        -fx-opacity: 40%;
+      }
+    }
+
+    &.scene-visibility-hidden {
+      .visibility-toggle {
+        visibility: visible;
+      }
+    }
+
+    &.hideable:hover {
+      .visibility-toggle {
+        visibility: visible;
+      }
+    }
+
+    .text-field {
+      -fx-background-color: transparent;
+      -fx-padding: 0;
+      -fx-border-width: 0;
+      -fx-min-height: 14px;
+    }
+  }
+}

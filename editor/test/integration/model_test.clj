@@ -1,0 +1,203 @@
+;; Copyright 2020-2026 The Defold Foundation
+;; Copyright 2014-2020 King
+;; Copyright 2009-2014 Ragnar Svensson, Christian Murray
+;; Licensed under the Defold License version 1.0 (the "License"); you may not use
+;; this file except in compliance with the License.
+;;
+;; You may obtain a copy of the License, together with FAQs at
+;; https://www.defold.com/license
+;;
+;; Unless required by applicable law or agreed to in writing, software distributed
+;; under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+;; CONDITIONS OF ANY KIND, either express or implied. See the License for the
+;; specific language governing permissions and limitations under the License.
+
+(ns integration.model-test
+  (:require [clojure.test :refer :all]
+            [dynamo.graph :as g]
+            [editor.properties :as properties]
+            [editor.protobuf :as protobuf]
+            [editor.types :as types]
+            [editor.workspace :as workspace]
+            [integration.test-util :as test-util]
+            [util.coll :as coll]
+            [util.murmur :as murmur])
+  (:import [com.dynamo.gamesys.proto ModelProto$ModelDesc]
+           [javax.vecmath Point3d]))
+
+(defn- find-mesh-set-build-target
+  [build-targets]
+  (coll/first-where #(contains? (:user-data %) :mesh-set)
+                    (eduction (coll/tree-xf #(coll/not-empty (:deps %)) :deps)
+                              build-targets)))
+
+(deftest aabb
+  (test-util/with-loaded-project
+    (let [node-id (test-util/resource-node project "/model/test.model")
+          scene (g/node-value node-id :scene)
+          aabb (:aabb scene)
+          min ^Point3d (types/min-p aabb)
+          max ^Point3d (types/max-p aabb)]
+      (is (< 1 (.distance max min) 2)))))
+
+(deftest textures
+  (test-util/with-loaded-project
+    (let [node-id (test-util/resource-node project "/model/test.model")
+          original-materials (test-util/prop node-id :materials)
+          original-texture (get-in original-materials [0 :textures 0 :texture])
+          texture-binding-id (get-in (g/node-value node-id :material-binding-infos) [0 :texture-binding-infos 0 :_node-id])]
+      (test-util/prop! texture-binding-id :texture original-texture)
+      (is (= original-materials (test-util/prop node-id :materials)))
+      (let [p (-> (properties/coalesce [(g/node-value node-id :_properties)])
+                  :properties
+                  :__sampler__0__0)]
+        (properties/set-values! p [original-texture]))))
+  (testing "Loading textures renames them to match the material"
+    (test-util/with-loaded-project "test/resources/model_migration_project"
+      ;; test2.model has textures that don't match the names of the material, so
+      ;; loading the model renames the texture bindings
+      (let [node-id (test-util/resource-node project "/test.model")]
+        (is (g/node-value node-id :dirty))
+        (is (= #{"tex_foo" "tex_bar" "tex_baz"}
+               (->> (g/node-value node-id :resource)
+                    (protobuf/read-map-without-defaults ModelProto$ModelDesc)
+                    :materials
+                    (into #{}
+                          (comp
+                            (mapcat :textures)
+                            (map :sampler))))))
+        (is (= #{"tex0" "tex1" "tex2"}
+               (into #{}
+                     (comp
+                       (mapcat :textures)
+                       (map :sampler))
+                     (g/node-value node-id :materials))))))))
+
+(deftest animations
+  (test-util/with-loaded-project
+    (let [node-id (test-util/resource-node project "/model/test.model")]
+      (testing "can assign single glTF file as animations"
+        (let [gltf-resource (workspace/resolve-workspace-resource workspace "/mesh/treasure_chest.gltf")]
+          (test-util/with-prop [node-id :animations gltf-resource]
+            (is (= #{(murmur/hash64 "Bend2bones")
+                     (murmur/hash64 "Bend90")}
+                   (set (map :id (:animations (g/node-value node-id :animation-set)))))))))
+      (testing "can assign animation set as animations"
+        (let [animation-set-resource (workspace/resolve-workspace-resource workspace "/model/treasure_chest.animationset")]
+          (test-util/with-prop [node-id :animations animation-set-resource]
+            (is (= #{(murmur/hash64 "treasure_chest")
+                     (murmur/hash64 "treasure_chest_sub_animation/treasure_chest_anim_out")
+                     (murmur/hash64 "treasure_chest_sub_sub_animation/treasure_chest_anim_out")}
+                   (set (map :id (:animations (g/node-value node-id :animation-set))))))))))))
+
+(deftest mesh-selection
+  (test-util/with-loaded-project
+    (let [node-id (test-util/resource-node project "/model/mesh_selection.model")
+          mesh-scene-node-id (test-util/resource-node project "/mesh/two_meshes.gltf")]
+      (testing "uses the mesh-name documentation for the selector"
+        (let [mesh-index-property (get-in (g/node-value node-id :_properties) [:properties :mesh-index])]
+          (is (= "property.model.mesh-name" (-> mesh-index-property :label :k)))
+          (is (= "Mesh" (test-util/localization (:label mesh-index-property))))
+          (is (= "property.model.mesh-name.tooltip" (-> mesh-index-property :tooltip :k)))
+          (is (= "Optional named raw mesh from the selected scene. Leave empty to render the whole scene. A selected mesh is rendered once in mesh-local coordinates without glTF node transforms."
+                 (test-util/localization (:tooltip mesh-index-property))))))
+
+      (testing "loads and saves a selected raw glTF mesh"
+        (is (= "LooseMesh" (test-util/prop node-id :mesh-name)))
+        (is (= 2 (test-util/prop node-id :mesh-index)))
+        (is (= [[-1 ""] [0 "LeftMesh"] [1 "RightMesh"] [2 "LooseMesh"]]
+               (get-in (g/node-value node-id :_properties) [:properties :mesh-index :edit-type :options])))
+        (is (= "LooseMesh" (:mesh-name (g/node-value node-id :save-value))))
+        (is (= 2 (:mesh-index (g/node-value node-id :save-value))))
+        (let [scene (g/node-value node-id :scene)]
+          (is (= 2 (count (:children scene))))
+          (is (= [0.0 0.0 0.0] (:translation (:pose (nth (:children scene) 1))))))
+        (let [mesh-set (get-in (g/node-value mesh-scene-node-id :content) [:mesh-set])
+              renderable-mesh-set (g/node-value mesh-scene-node-id :renderable-mesh-set)]
+          (is (= [0 0 1] (mapv (comp count :meshes) (:raw-models mesh-set))))
+          (is (identical? (get-in renderable-mesh-set [:renderable-models 0 :renderable-meshes])
+                          (get-in renderable-mesh-set [:renderable-raw-models 0 :renderable-meshes]))))
+        (test-util/with-prop [node-id :mesh-name "LeftMesh"]
+          (test-util/with-prop [node-id :mesh-index 0]
+            (let [scene (g/node-value node-id :scene)
+                  selected-model-scene (nth (:children scene) 1)
+                  mesh-set-build-target (find-mesh-set-build-target (g/node-value node-id :build-targets))]
+              (is (= [0.0 0.0 0.0] (:translation (:pose selected-model-scene))))
+              (is (pos? (count (:children selected-model-scene))))
+              (is (= [0] (mapv :mesh-index (get-in mesh-set-build-target [:user-data :mesh-set :models]))))
+              (is (= [0] (mapv :mesh-index (get-in mesh-set-build-target [:user-data :mesh-set :raw-models])))))))
+        (let [mesh-set-build-target (find-mesh-set-build-target (g/node-value node-id :build-targets))]
+          (is (coll/empty? (get-in mesh-set-build-target [:user-data :mesh-set :models])))
+          (is (= [2] (mapv :mesh-index (get-in mesh-set-build-target [:user-data :mesh-set :raw-models])))))
+        (is (coll/empty? (get-in (g/node-value mesh-scene-node-id :mesh-set-build-target)
+                                 [:user-data :mesh-set :raw-models]))))
+
+      (testing "a selected mesh with a skeleton uses the selected mesh bounds"
+        (let [skeleton-resource (workspace/resolve-workspace-resource workspace "/mesh/treasure_chest.gltf")]
+          (test-util/with-prop [node-id :skeleton skeleton-resource]
+            (let [aabb (:aabb (g/node-value node-id :scene))]
+              (is (= (Point3d. 0.0 0.0 0.0) (types/min-p aabb)))
+              (is (= (Point3d. 1.0 1.0 0.0) (types/max-p aabb)))))))
+
+      (testing "an invalid stale selection renders no mesh"
+        (test-util/with-prop [node-id :mesh-index 0]
+          (test-util/with-prop [node-id :mesh-name "MissingMesh"]
+            (is (g/error? (test-util/prop-error node-id :mesh-index)))
+            (is (= 1 (count (:children (g/node-value node-id :scene))))))))
+
+      (testing "an empty selection renders the entire scene and omits the fields"
+        (test-util/with-prop [node-id :mesh-name ""]
+          (test-util/with-prop [node-id :mesh-index -1]
+            (let [save-value (g/node-value node-id :save-value)]
+              (is (= "" (test-util/prop node-id :mesh-name)))
+              (is (not (contains? save-value :mesh-name)))
+              (is (not (contains? save-value :mesh-index)))
+              (is (= 3 (count (:children (g/node-value node-id :scene)))))
+              (let [mesh-set-build-target (find-mesh-set-build-target (g/node-value node-id :build-targets))]
+                (is (coll/empty? (get-in mesh-set-build-target [:user-data :mesh-set :raw-models])))))))))))
+
+(deftest model-validation
+  (test-util/with-loaded-project
+    (let [node-id (test-util/resource-node project "/model/test.model")]
+
+      (testing "mesh is required"
+        (is (nil? (test-util/prop-error node-id :mesh)))
+        (doseq [v [nil (workspace/resolve-workspace-resource workspace "/not_found.gltf")]]
+          (test-util/with-prop [node-id :mesh v]
+            (is (g/error? (test-util/prop-error node-id :mesh)))
+            (is (g/error-value? (g/node-value node-id :build-targets))))))
+
+      (testing "unsupported model file formats fail before build"
+        (let [dae-resource (workspace/resolve-workspace-resource workspace "/model/unsupported.dae")]
+          (doseq [prop-kw [:mesh :skeleton :animations]]
+            (test-util/with-prop [node-id prop-kw dae-resource]
+              (let [prop-error (test-util/prop-error node-id prop-kw)
+                    prop-error-message (test-util/localization (g/error-message prop-error))
+                    build-targets (g/node-value node-id :build-targets)
+                    build-error-message (some->> (tree-seq :causes :causes build-targets)
+                                                 (some :message)
+                                                 test-util/localization)]
+                (is (g/error? prop-error))
+                (is (re-find #"unsupported format \.dae" prop-error-message))
+                (is (re-find #"Defold supports only" prop-error-message))
+                (is (g/error-value? build-targets))
+                (is (= prop-error-message build-error-message)))))))
+
+      (testing "material must be assigned and exist"
+        (is (not (g/error-value? (g/node-value node-id :build-targets))))
+        (doseq [v [nil (workspace/resolve-workspace-resource workspace "/not_found.material")]]
+          (test-util/with-prop [node-id :__material__0 v]
+            (is (g/error? (test-util/prop-error node-id :__material__0)))
+            (is (g/error-value? (g/node-value node-id :build-targets))))))
+
+      (testing "default-animation should be empty string or a valid animation"
+        (is (nil? (test-util/prop-error node-id :animations)))
+        (is (nil? (test-util/prop-error node-id :default-animation)))
+        (test-util/with-prop [node-id :animations (workspace/resolve-workspace-resource workspace "/model/treasure_chest.animationset")]
+          (test-util/with-prop [node-id :default-animation ""]
+            (is (not (g/error? (test-util/prop-error node-id :default-animation)))))
+          (test-util/with-prop [node-id :default-animation "treasure_chest"]
+            (is (not (g/error? (test-util/prop-error node-id :default-animation)))))
+          (test-util/with-prop [node-id :default-animation "gurka"]
+            (is (g/error? (test-util/prop-error node-id :default-animation)))
+            (is (g/error-value? (g/node-value node-id :build-targets)))))))))

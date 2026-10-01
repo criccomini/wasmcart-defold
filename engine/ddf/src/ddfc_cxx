@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+DDFC=`dirname $0`/ddfc.py
+
+# NOTE: The output here is parsed later on, so don't print invalid code!
+
+python3 $DDFC --cxx $@

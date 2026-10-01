@@ -1,0 +1,341 @@
+;; Copyright 2020-2026 The Defold Foundation
+;; Copyright 2014-2020 King
+;; Copyright 2009-2014 Ragnar Svensson, Christian Murray
+;; Licensed under the Defold License version 1.0 (the "License"); you may not use
+;; this file except in compliance with the License.
+;;
+;; You may obtain a copy of the License, together with FAQs at
+;; https://www.defold.com/license
+;;
+;; Unless required by applicable law or agreed to in writing, software distributed
+;; under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+;; CONDITIONS OF ANY KIND, either express or implied. See the License for the
+;; specific language governing permissions and limitations under the License.
+
+(ns editor.engine.native-extensions
+  (:require [clojure.java.io :as io]
+            [clojure.string :as string]
+            [dynamo.graph :as g]
+            [editor.connection-properties :as connection-properties]
+            [editor.defold-project :as project]
+            [editor.engine.build-errors :as engine-build-errors]
+            [editor.fs :as fs]
+            [editor.prefs :as prefs]
+            [editor.resource :as resource]
+            [editor.resource-node :as resource-node]
+            [editor.shared-editor-settings :as shared-editor-settings]
+            [editor.system :as system]
+            [editor.workspace :as workspace]
+            [editor.yaml :as yaml]
+            [util.coll :as coll])
+  (:import [com.defold.extender.client ExtenderClient ExtenderClientCache ExtenderResource]
+           [com.dynamo.bob Platform]
+           [java.io File]
+           [java.net URI]
+           [java.nio.charset StandardCharsets]
+           [java.util ArrayList Base64]))
+
+(set! *warn-on-reflection* true)
+
+;;; Caching
+
+(defn- cache-dir ^File
+  [project-directory]
+  (doto (io/file project-directory ".internal" "cache" "engine-archives")
+    (fs/create-directories!)))
+
+;;; Extension discovery/processing
+
+(def ^:private extender-platforms
+  {(.getPair Platform/Arm64MacOS)   {:platform      "arm64-osx"
+                                     :library-paths #{"osx" "arm64-osx"}}
+   (.getPair Platform/X86_64MacOS)  {:platform      "x86_64-osx"
+                                     :library-paths #{"osx" "x86_64-osx"}}
+   (.getPair Platform/Arm64Ios)     {:platform      "arm64-ios"
+                                     :library-paths #{"ios" "arm64-ios"}}
+   (.getPair Platform/Arm64IosSim)  {:platform      "arm64_sim-ios"
+                                     :library-paths #{"ios" "arm64_sim-ios"}}
+   (.getPair Platform/Armv7Android) {:platform      "armv7-android"
+                                     :library-paths #{"android" "armv7-android"}}
+   (.getPair Platform/Arm64Android) {:platform      "arm64-android"
+                                     :library-paths #{"android" "arm64-android"}}
+   (.getPair Platform/X86_64Android) {:platform     "x86_64-android"
+                                     :library-paths #{"android" "x86_64-android"}}
+   (.getPair Platform/WasmWeb)      {:platform      "wasm-web"
+                                     :library-paths #{"web" "wasm-web"}}
+   (.getPair Platform/WasmPthreadWeb) {:platform      "wasm_pthread-web"
+                                       :library-paths #{"web" "wasm_pthread-web"}}
+   (.getPair Platform/X86_64Win32)  {:platform      "x86_64-win32"
+                                     :library-paths #{"win32" "x86_64-win32"}}
+   (.getPair Platform/X86_64Linux)  {:platform      "x86_64-linux"
+                                     :library-paths #{"linux" "x86_64-linux"}}
+   (.getPair Platform/Arm64Linux)   {:platform      "arm64-linux"
+                                     :library-paths #{"linux" "arm64-linux"}}})
+
+(def ^:private common-extension-paths
+  [["ext.manifest"]
+   ["include"]
+   ["manifests"]
+   ["src"]
+   ["commonsrc"]
+   ;["pluginsrc"] ; We explicitly don't include this until we can build different build targets from within the editor (e.g. using "build-plugins" as bob does)
+   ["lib" "common"]])
+
+(defn- platform-extension-paths
+  [platform]
+  (into common-extension-paths (map #(vector "lib" %) (get-in extender-platforms [platform :library-paths]))))
+
+(defn- engine-extension-root?
+  "Tests if the resource is an extension root that should be built remotely
+
+  Engine extension root should be a folder with ext.manifest file and either src
+  or commonsrc folder"
+  [resource]
+  (= :both
+     (reduce
+       (fn [acc resource]
+         (case (resource/resource-name resource)
+           "ext.manifest"
+           (if (= acc :source)
+             (reduced :both)
+             :manifest)
+
+           ("src" "commonsrc")
+           (if (= acc :manifest)
+             (reduced :both)
+             :source)
+           acc))
+       :none
+       (resource/children resource))))
+
+(defn engine-extension-roots
+  [project evaluation-context]
+  (->> (g/node-value project :resources evaluation-context)
+       (filter engine-extension-root?)
+       seq))
+
+(defn- resource-child
+  [resource name]
+  (when resource
+    (first (filter #(= name (resource/resource-name %)) (resource/children resource)))))
+
+(defn- resource-by-path
+  [resource path]
+  (reduce resource-child resource path))
+
+(defn extension-resource-nodes
+  [project evaluation-context platform]
+  (let [native-extension-roots (engine-extension-roots project evaluation-context)
+        paths (platform-extension-paths platform)]
+    (->> (for [root native-extension-roots
+               path paths
+               :let [resource (resource-by-path root path)]
+               :when resource]
+           resource)
+         (mapcat resource/resource-seq)
+         (filter #(= :file (resource/source-type %)))
+         (map (fn [resource]
+                (project/get-resource-node project resource evaluation-context))))))
+
+;;; Extender API
+
+(defn- build-url
+  [extender-platform sdk-version]
+  (format "/build/%s/%s" extender-platform (or sdk-version "")))
+
+(defn supported-platform? [platform]
+  (contains? extender-platforms platform))
+
+;;; Building
+
+(defn get-build-server-url
+  (^String [prefs project]
+   (g/with-auto-evaluation-context evaluation-context
+     (get-build-server-url prefs project evaluation-context)))
+  (^String [prefs project evaluation-context]
+   (or (not-empty (string/trim (prefs/get prefs [:extensions :build-server]))) ;; always trim because `prefs/get` does not return nil
+       (not-empty (some-> (shared-editor-settings/get-setting project ["extensions" "build_server"] evaluation-context) string/trim)) ;; use `some->` because `get-setting` may return nil
+       (connection-properties/defold-build-server-url))))
+
+(defn get-build-server-headers
+  "Returns a (possibly empty) vector of header strings"
+  [prefs]
+  (into [] (remove string/blank?) (string/split-lines (prefs/get prefs [:extensions :build-server-headers]))))
+
+(def ^:private app-manifest-upload-path "_app/app.manifest")
+
+(def ^:private editor-build-app-manifest-context
+  {"baseVariant" "debug"
+   "withSymbols" true})
+
+(defn- resource-node-content ^bytes [resource-node evaluation-context]
+  (if-let [content (some-> (g/node-value resource-node :save-data evaluation-context)
+                           (resource-node/save-data-content))]
+    (.getBytes content StandardCharsets/UTF_8)
+    (with-open [is (io/input-stream (g/node-value resource-node :resource evaluation-context))]
+      (.readAllBytes is))))
+
+(defn- resource-node-last-modified [resource-node evaluation-context]
+  (.lastModified (io/file (g/node-value resource-node :resource evaluation-context))))
+
+(defn- app-manifest-with-editor-build-context [manifest]
+  (when (and (map? manifest)
+             (or (not (contains? manifest "context"))
+                 (map? (get manifest "context"))))
+    (update manifest "context" merge editor-build-app-manifest-context)))
+
+(defn- dump-app-manifest-content ^bytes [manifest]
+  (let [^String content (yaml/dump manifest
+                                   :order-pattern ["context" "platforms"]
+                                   :indent 4)]
+    (.getBytes content StandardCharsets/UTF_8)))
+
+(defn- app-manifest-content ^bytes [app-manifest-resource-node evaluation-context]
+  (let [^bytes original-content (when app-manifest-resource-node
+                                  (resource-node-content app-manifest-resource-node evaluation-context))
+        manifest (if original-content
+                   (yaml/load (String. original-content StandardCharsets/UTF_8))
+                   {})
+        manifest-with-context (app-manifest-with-editor-build-context manifest)]
+    (if manifest-with-context
+      (dump-app-manifest-content manifest-with-context)
+      original-content)))
+
+(defn- make-app-manifest-resource [app-manifest-resource-node evaluation-context]
+  (reify ExtenderResource
+    (getPath [_] app-manifest-upload-path)
+    (getContent [_]
+      (app-manifest-content app-manifest-resource-node evaluation-context))
+    (getLastModified [_]
+      (if app-manifest-resource-node
+        (resource-node-last-modified app-manifest-resource-node evaluation-context)
+        0))))
+
+(defn- global-resource-nodes-by-upload-path [project evaluation-context]
+  (let [project-settings (g/node-value project :settings evaluation-context)]
+    (into {}
+          (keep (fn [[[section key] target]]
+                  (when-let [proj-path (get project-settings [section key])]
+                    (let [resource-node (project/get-resource-node project proj-path evaluation-context)]
+                      (if (some-> resource-node (g/node-value :resource evaluation-context) resource/exists?)
+                        [target resource-node]
+                        (throw (engine-build-errors/missing-resource-error
+                                 "Missing Native Extension Resource"
+                                 proj-path
+                                 (project/get-resource-node project "/game.project" evaluation-context))))))))
+          [[["native_extension" "app_manifest"] app-manifest-upload-path]])))
+
+(defn- get-ne-platform [platform]
+  (case platform
+    "arm64-macos" "arm64-osx"
+    "x86_64-macos" "x86_64-osx"
+    platform))
+
+(defn- get-main-manifest-section-and-key [platform]
+   (case platform
+     "armv7-android"    ["android" "manifest"]
+     "arm64-android"    ["android" "manifest"]
+     "x86_64-android"   ["android" "manifest"]
+     "arm64-ios"        ["ios" "infoplist"]
+     "arm64_sim-ios"    ["ios" "infoplist"]
+     "arm64-osx"        ["osx" "infoplist"]
+     "x86_64-osx"       ["osx" "infoplist"]
+     "wasm-web"         ["html5" "htmlfile"]
+     "wasm_pthread-web" ["html5" "htmlfile"]))
+
+(defn- get-main-manifest-name [ne-platform]
+  (case ne-platform
+    "armv7-android"    "AndroidManifest.xml"
+    "arm64-android"    "AndroidManifest.xml"
+    "x86_64-android"   "AndroidManifest.xml"
+    "arm64-ios"        "Info.plist"
+    "arm64_sim-ios"    "Info.plist"
+    "arm64-osx"        "Info.plist"
+    "x86_64-osx"       "Info.plist"
+    "wasm-web"         "engine_template.html"
+    "wasm_pthread-web" "engine_template.html"
+    nil))
+
+(defn- get-main-manifest-file-upload-resource [project evaluation-context platform]
+  (let [ne-platform (get-ne-platform platform)
+        target-path (get-main-manifest-name ne-platform)]
+    (when target-path
+      (let [project-settings (g/node-value project :settings evaluation-context)
+            [section key] (get-main-manifest-section-and-key ne-platform)
+            resource (get project-settings [section key])
+            resource-node (project/get-resource-node project resource evaluation-context)]
+        {target-path resource-node}))))
+
+(defn- resource-node-upload-path [resource-node evaluation-context]
+  (fs/without-leading-slash (resource/proj-path (g/node-value resource-node :resource evaluation-context))))
+
+(defn- extension-resource-nodes-by-upload-path [project evaluation-context platform]
+  (into {}
+        (map (juxt #(resource-node-upload-path % evaluation-context) identity))
+        (extension-resource-nodes project evaluation-context platform)))
+
+(defn has-engine-extensions?
+  "Returns true if the project's engine should be built remotely"
+  [project evaluation-context]
+  (boolean
+    (or (seq (engine-extension-roots project evaluation-context))
+        (pos? (count (global-resource-nodes-by-upload-path project evaluation-context))))))
+
+(defn- make-extender-resources [project platform evaluation-context]
+  (let [global-resource-nodes (global-resource-nodes-by-upload-path project evaluation-context)]
+    (reduce-kv
+      (fn [^ArrayList acc upload-path resource-node]
+        (doto acc
+          (.add (reify ExtenderResource
+                  (getPath [_] upload-path)
+                  (getContent [_]
+                    (resource-node-content resource-node evaluation-context))
+                  (getLastModified [_]
+                    (resource-node-last-modified resource-node evaluation-context))))))
+      (doto (ArrayList.)
+        (.add (make-app-manifest-resource (get global-resource-nodes app-manifest-upload-path) evaluation-context)))
+      (merge (dissoc global-resource-nodes app-manifest-upload-path)
+             (extension-resource-nodes-by-upload-path project evaluation-context platform)
+             (get-main-manifest-file-upload-resource project evaluation-context platform)))))
+
+(defn get-engine-archive [project platform prefs evaluation-context]
+  (if-not (supported-platform? platform)
+    (throw (engine-build-errors/unsupported-platform-error platform))
+    (let [basis (:basis evaluation-context)
+          extender-platform (get-in extender-platforms [platform :platform])
+          project-directory (workspace/project-directory basis (project/workspace project evaluation-context))
+          cache-directory (cache-dir project-directory)
+          sdk-version (system/defold-engine-sha1)
+          cache (ExtenderClientCache. cache-directory)
+          extender-resources (make-extender-resources project platform evaluation-context)
+          cache-key (.calcKey cache extender-platform sdk-version extender-resources)
+          url (get-build-server-url prefs project evaluation-context)
+          headers (get-build-server-headers prefs)
+          username (string/trim (prefs/get prefs [:extensions :build-server-username]))
+          password (prefs/get prefs [:extensions :build-server-password])]
+      (if (.isCached cache extender-platform cache-key)
+        {:id {:type :custom :version cache-key}
+         :cached true
+         :engine-archive (.getCachedBuildFile cache extender-platform)
+         :extender-platform extender-platform}
+        (let [extender-client (ExtenderClient. url cache-directory)
+              destination-file (fs/create-temp-file! (str "build_" sdk-version) ".zip")
+              log-file (fs/create-temp-file! (str "build_" sdk-version) ".txt")]
+          (try
+            (when-let [^String auth (or
+                                      (and (not (string/blank? username))
+                                           (not (coll/empty? password))
+                                           (str username ":" password))
+                                      (.getUserInfo (URI. url)))]
+              (.setHeader extender-client "Authorization" (str "Basic " (.encodeToString (Base64/getEncoder) (.getBytes auth StandardCharsets/UTF_8)))))
+            (when (pos? (count headers))
+              (.setHeaders extender-client headers))
+            (.build extender-client extender-platform sdk-version extender-resources destination-file log-file)
+            {:id {:type :custom :version cache-key}
+             :engine-archive destination-file
+             :extender-platform extender-platform}
+            (catch Exception e
+              (throw (engine-build-errors/build-error
+                       (or (:cause (Throwable->map e))
+                           (.getSimpleName (class e)))
+                       (slurp log-file))))))))))

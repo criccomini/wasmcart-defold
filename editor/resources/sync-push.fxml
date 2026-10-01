@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.*?>
+
+<BorderPane maxHeight="-Infinity" maxWidth="-Infinity" minHeight="-Infinity" minWidth="-Infinity" prefHeight="600.0" prefWidth="600.0" xmlns="http://javafx.com/javafx/8.0.40" xmlns:fx="http://javafx.com/fxml/1">
+   <bottom>
+      <HBox BorderPane.alignment="CENTER">
+         <children>
+            <Pane HBox.hgrow="ALWAYS" />
+         </children>
+      </HBox>
+   </bottom>
+   <padding>
+      <Insets bottom="16.0" left="16.0" right="16.0" top="16.0" />
+   </padding>
+   <top>
+      <Label id="main-label" text="Stage Local Changes" BorderPane.alignment="CENTER">
+         <font>
+            <Font size="18.0" />
+         </font>
+      </Label>
+   </top>
+   <center>
+      <StackPane BorderPane.alignment="CENTER">
+         <children>
+            <TextFlow id="push-info-box" visible="false" />
+            <VBox id="content-box" prefHeight="200.0" prefWidth="100.0">
+               <children>
+                  <Label id="changed-files" text="Changed Files" />
+                  <ListView id="changed" prefHeight="200.0" prefWidth="200.0" VBox.vgrow="ALWAYS" />
+                  <HBox BorderPane.alignment="CENTER">
+                     <padding>
+                        <Insets top="16.0" />
+                     </padding>
+                     <children>
+                        <Pane HBox.hgrow="ALWAYS">
+                           <children>
+                              <Button id="diff" mnemonicParsing="false" prefWidth="80.0" text="View Diff" />
+                           </children>
+                        </Pane>
+                        <Button id="stage" mnemonicParsing="false" prefWidth="80.0" text="&#x25bc; Stage" />
+                        <Button id="unstage" mnemonicParsing="false" prefWidth="80.0" text="&#x25b2; Unstage" />
+                     </children>
+                     <padding>
+                        <Insets bottom="0.0" left="16.0" right="16.0" top="26.0" />
+                     </padding>
+                  </HBox>
+                  <Label text="Files Staged for Commit">
+                     <padding>
+                        <Insets top="16.0" />
+                     </padding>
+                  </Label>
+                  <ListView id="staged" prefHeight="200.0" prefWidth="200.0" />
+                  <Label text="Commit Message">
+                     <padding>
+                        <Insets top="16.0" />
+                     </padding>
+                  </Label>
+                  <TextArea id="message" prefHeight="200.0" prefWidth="200.0" promptText="Describe Your Changes" />
+                  <GridPane hgap="16.0">
+                     <columnConstraints>
+                        <ColumnConstraints hgrow="ALWAYS" />
+                        <ColumnConstraints hgrow="ALWAYS" />
+                     </columnConstraints>
+                     <rowConstraints>
+                        <RowConstraints vgrow="NEVER" />
+                        <RowConstraints vgrow="NEVER" />
+                     </rowConstraints>
+                     <padding>
+                        <Insets top="16.0" />
+                     </padding>
+                     <Label text="Committer Name" GridPane.columnIndex="0" GridPane.rowIndex="0" />
+                     <TextField id="committer-name-field" promptText="Your Name" GridPane.columnIndex="0" GridPane.rowIndex="1" />
+                     <Label text="Committer E-mail" GridPane.columnIndex="1" GridPane.rowIndex="0" />
+                     <TextField id="committer-email-field" promptText="your.name@example.com" GridPane.columnIndex="1" GridPane.rowIndex="1" />
+                  </GridPane>
+               </children>
+            </VBox>
+         </children>
+      </StackPane>
+   </center>
+</BorderPane>

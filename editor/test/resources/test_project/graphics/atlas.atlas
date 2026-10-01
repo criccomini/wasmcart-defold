@@ -1,0 +1,12 @@
+images {
+    image:  "/graphics/ball.png"
+}
+images {
+    image:  "/graphics/left_hud.png"
+}
+animations {
+    id: "anim"
+    images {
+        image:   "/graphics/ball.png"
+    }
+}

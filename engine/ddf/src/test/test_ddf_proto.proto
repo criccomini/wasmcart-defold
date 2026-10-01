@@ -1,0 +1,419 @@
+syntax = "proto2";
+package TestDDF;
+
+import "ddf/ddf_extensions.proto";
+
+option java_package = "com.dynamo.ddf.proto";
+option (ddf_namespace) = "DUMMY";
+option java_outer_classname = "TestDDF";
+
+option (ddf_includes) = "test_ddf.h test_ddf_import.h";
+
+import "test_ddf_import.proto";
+
+message Simple
+{
+    required int32 a = 1;
+}
+
+message ScalarTypes
+{
+    required float  float_val = 1;
+    required double double_val = 2;
+    required int32  int32_val = 3;
+    required uint32 uint32_val = 4;
+    required int64  int64_val = 5;
+    required uint64 uint64_val = 6;
+    required string string_val = 7;
+    required bool bool_val = 8;
+}
+
+enum TestEnum
+{
+    TEST_ENUM_VAL1 = 10;
+    TEST_ENUM_VAL2 = 20;
+}
+
+// Test for bug with duplicate enums. Introduced in previous commit
+enum TestEnumB
+{
+    test_enum_val_b1 = 10;
+    test_enum_val_b2 = 20;
+}
+
+// http://localhost:8080/redmine/issues/22
+message TestGlobalEnumBug
+{
+    required TestEnum t = 1;
+}
+
+message NestedType
+{
+    message TheNestedType
+    {
+        required int32 x = 1;
+    }
+    required int32 x = 1;
+}
+
+message Simple01
+{
+    required uint32 x = 1;
+    required uint32 y = 2;
+}
+
+message Simple01Repeated
+{
+    repeated Simple01 array = 1;
+}
+
+message Simple02Repeated
+{
+    repeated uint32 array = 1;
+}
+
+message StringRepeated
+{
+    repeated string array = 1;
+}
+
+message NestedMessage
+{
+    message Nested
+    {
+        required int32 x = 1;
+    }
+
+    required Nested n1 = 1;
+    required Nested n2 = 2;
+}
+
+message Mesh
+{
+    enum Primitive
+    {
+        TRIANGLES = 1;
+        QUADS = 2;
+    }
+
+    required string    name = 1;
+    repeated float     vertices = 2;
+    repeated uint32    indices = 3;
+    required uint32    primitive_count = 4;
+    required Primitive primitive_type = 5;
+}
+
+message NestedArraySub2
+{
+    required uint32 a = 1;
+}
+
+message NestedArraySub1
+{
+    required uint32 b = 1;
+    repeated NestedArraySub2 array2 = 2;
+    required uint32 c = 3;
+}
+
+message NestedArray
+{
+    required uint32 d = 1;
+    repeated NestedArraySub1 array1 = 2;
+    required uint32 e = 3;
+}
+
+
+message Bytes
+{
+    /* Pad to check alignment of data */
+    required string pad = 1;
+    required bytes data = 2;
+}
+
+message ResolvePointers
+{
+    required bytes data = 1;
+    required string name = 2;
+    repeated string names = 3;
+}
+
+message MaterialDesc
+{
+    enum ParameterType
+    {
+        VECTOR1 = 1;
+        VECTOR2 = 2;
+        VECTOR3 = 3;
+        VECTOR4 = 4;
+    }
+
+    enum ParameterSemantic
+    {
+        GENERIC = 1;
+        COLOR = 2;
+    }
+
+    message Vector4
+    {
+        required float x = 1;
+        required float y = 2;
+        required float z = 3;
+        required float w = 4;
+    }
+
+    message Parameter
+    {
+        required string name = 1;
+        required ParameterType type = 2;
+        required ParameterSemantic semantic = 3;
+        required uint32 register = 4;
+        required Vector4 value = 5;
+    }
+
+    required string name = 1;
+    required string vertex_program = 2;
+    required string fragment_program = 3;
+    repeated Parameter vertex_parameters = 4;
+    repeated Parameter fragment_parameters = 5;
+}
+
+message MissingRequiredTemplate
+{
+	required int32 a = 1000;
+}
+
+message MissingRequired
+{
+	required int32 a = 1000;
+	required int32 b = 2000;
+}
+
+message Vector2Message
+{
+    option (alias) = "MyVector2";
+
+    required float X = 1;
+    required float Y = 2;
+}
+
+message TestStructAlias
+{
+    required Vector2Message vec2 = 1;
+}
+
+message TestImportMessage
+{
+    required TestDDFImport.ImportMessage msg = 1;
+}
+
+message QuatWithDefault
+{
+    optional float x = 1 [ default = 0.0 ];
+    optional float y = 2 [ default = 0.0 ];
+    optional float z = 3 [ default = 0.0 ];
+    optional float w = 4 [ default = 1.0 ];
+}
+
+message SubMessageWithOptionalQuat
+{
+    optional QuatWithDefault quat = 1;
+}
+
+message TestDefault
+{
+    optional float  float_val = 1 [ default = 10.0 ];
+    optional double double_val = 2 [ default = 20.0 ];
+    optional int32  int32_val = 3 [ default = -1122 ];
+    optional uint32 uint32_val = 4 [ default = 1234 ];
+    optional int64  int64_val = 5 [ default = -5678 ];
+    optional uint64 uint64_val = 6 [ default = 5566 ];
+    optional string string_val = 7 [ default = "a default value" ];
+    optional string empty_string_val = 8 [ default = "" ];
+
+    optional uint64 non_default_uint64 = 9;
+    optional string non_default_string = 10;
+
+    optional QuatWithDefault quat = 11;
+    optional SubMessageWithOptionalQuat sub_message = 12;
+
+    optional TestEnum enum = 13 [ default = TEST_ENUM_VAL2 ];
+
+    optional bool bool_val = 14 [ default = true ];
+    optional bool bool_val_false = 15 [ default = false ];
+}
+
+message EmptyMsg {}
+
+message TestMessageAlignment
+{
+    option (struct_align) = true;
+    required string dummy = 1;
+    required int32 pad = 2;
+}
+
+message TestFieldAlignment
+{
+    required string pad = 1;
+    required string needs_to_be_aligned1 = 2 [(field_align)=true];
+    required string needs_to_be_aligned2 = 3 [(field_align)=true];
+}
+
+message OneOfMessage
+{
+    message Nested
+    {
+        oneof nested_field_name
+        {
+            int32  nested_int_val    = 1;
+            string nested_string_val = 2;
+        }
+
+        optional int32 nested_but_not_in_oneof = 3 [ default = 13 ];
+    }
+
+    oneof one_of_field_one
+    {
+        int32 int_val       = 1;
+        TestEnum enum_val   = 2;
+        Simple01 simple_val = 3;
+    }
+
+    oneof one_of_field_two
+    {
+        int32 int_val_two        = 4;
+        TestEnum enum_val_two    = 5;
+        string simple_string_two = 6;
+    }
+
+    optional int32 not_in_oneof = 7;
+    optional Nested nested_val  = 8;
+}
+
+message OneOfMessageRepeat
+{
+    message Nested
+    {
+        // Note: Default values are not supported for oneof blocks!
+        oneof values
+        {
+            uint64 val_a = 1 [default = 2];
+            int32  val_b = 2 [default = 1];
+        }
+    }
+
+    repeated Nested nested_one_of = 3;
+    optional Nested nested_one_of_with_defaults = 4;
+}
+
+message OneOfMessageNested
+{
+    message SubOne
+    {
+        oneof Values
+        {
+            int32 value_one = 1;
+            float value_two = 2;
+        }
+
+        optional uint64 non_one_of = 3;
+    }
+
+    message SubTwo
+    {
+        oneof Values
+        {
+            int32 value_one      = 1;
+            SubOne value_sub_one = 2;
+        }
+    }
+
+    oneof composite
+    {
+        int32  one = 1;
+        SubTwo two = 2;
+    }
+}
+
+message OneOfMessageSave
+{
+    oneof one_of_field
+    {
+        bool bool_val     = 1;
+        int32 int_val     = 2;
+        uint64 uint64_val = 3;
+    }
+
+    oneof one_of_field_string
+    {
+        int32 int_val_no_string = 4;
+        bool bool_val_no_string = 5;
+        string string_val       = 6;
+    }
+}
+
+message MessageRecursiveA
+{
+    optional int32 val_a = 1;
+    optional MessageRecursiveB my_b = 2;
+}
+
+message MessageRecursiveB
+{
+    optional int32 val_b = 1;
+    optional MessageRecursiveA my_a = 2;
+}
+
+message RecursiveRepeat
+{
+    repeated MessageRecursiveA list_a = 1;
+    optional string string_val = 2;
+    required float float_val = 3;
+    repeated int32 list_numbers = 4;
+}
+
+message TestMessageRecursive
+{
+    // Size 16 (object ptr, name ptr)
+    message Member
+    {
+        required Object obj_val = 1;
+        required string name = 2;
+    }
+
+    // Size 24 (member ptr 8, member count 4, alignment 4 byte, name ptr)
+    message Object
+    {
+        repeated Member members = 1;
+        required string name    = 2;
+    }
+
+    repeated Object objects = 1;
+}
+
+message JSONValue
+{
+    oneof value
+    {
+        string string_value = 1;
+        int32 number_value = 2;
+        bool bool_value = 3;
+        JSONArray array_value = 4;
+        JSONObject object_value = 5;
+    }
+}
+
+message JSONPair
+{
+    required string key = 1;
+    required JSONValue value = 2;
+}
+
+message JSONArray
+{
+    repeated JSONValue items = 1;
+}
+
+message JSONObject
+{
+    repeated JSONPair pairs = 1;
+}

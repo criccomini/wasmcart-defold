@@ -1,0 +1,24 @@
+.composite-property-control-container {
+    .text-input {
+        -fx-background-insets: 0;
+        -fx-border-insets: 0;
+    }
+    .button, .button-small, .button-large {
+        -fx-background-radius: 0px;
+        -fx-border-radius: 0px;
+        -fx-background-insets: 0;
+        -fx-background-color: -df-component-dark;
+        -fx-border-width: 0;
+        -fx-padding: 5 4;
+        -fx-pref-width: 23;
+        -fx-max-width: 24px;
+        -fx-text-fill: -df-component-icon;
+        &:hover {
+            -fx-background-color: -df-component-lighter !important;
+            -fx-border-color: -df-background;
+        }
+        &:armed, &:pressed {
+            -fx-background-color: -df-component-light !important;
+        }
+    }
+}
