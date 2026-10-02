@@ -22,6 +22,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The host-side libraries link against X11 and GL, and a runner has no
+      # -dev packages for them: the build failed with "unable to find library
+      # -lXext". This is upstream's own documented list (docs/README_SETUP.md),
+      # minus the packages that no longer exist on current Ubuntu and are not
+      # needed for a wasm-web build.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake build-essential libtool \
+            libssl-dev uuid-dev libcurl4-openssl-dev \
+            libxi-dev libxext-dev libx11-xcb-dev libxrandr-dev \
+            libgl1-mesa-dev libglu1-mesa-dev libopenal-dev
+
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
