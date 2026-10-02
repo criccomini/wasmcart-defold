@@ -26,6 +26,14 @@ jobs:
         with:
           python-version: '3.12'
 
+      # CMakeLists.txt sets cmake_minimum_required(VERSION 4.0) and the build
+      # uses the Ninja generator. Runners ship cmake 3.31, so both are
+      # installed explicitly rather than assumed.
+      - uses: lukka/get-cmake@v4.4.2
+        with:
+          cmakeVersion: '4.0.3'
+          ninjaVersion: 'latest'
+
       # cmake's FindJava has to locate a JDK. Installing one explicitly keeps
       # this independent of whatever a particular developer's tree happens to
       # contain under tmp/.
