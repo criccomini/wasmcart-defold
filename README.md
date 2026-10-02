@@ -27,6 +27,10 @@ This is Defold without a browser. Defold's own HTML5 export needs a DOM, a
 WebGL canvas and JS glue; this is standalone WASM with none of that, which is
 why it reaches hosts Defold has no export for.
 
+Ready-made carts and worked projects are in
+[wasmcart-defold-examples](https://github.com/wasmcart/wasmcart-defold-examples):
+five complete games plus the fixtures that exercise the engine surface.
+
 Upstream Defold is **vendored, not forked** (see
 [How this repo is organised](#how-this-repo-is-organised)). Upstream's own
 README is kept as [`docs/upstream/README_DEFOLD.md`](docs/upstream/README_DEFOLD.md).
@@ -108,8 +112,9 @@ A manifest `width`/`height` is the cart author stating the size the cart wants,
 and the runtime adopts it as its resolution.
 
 Worked examples, a `build-cart.sh` that encodes all of the above, and a
-migration script for pre-1.13 projects live in `wasmcart-defold-examples`
-(not yet published).
+migration script for pre-1.13 projects live in
+[wasmcart-defold-examples](https://github.com/wasmcart/wasmcart-defold-examples),
+which carries twelve carts including five complete games.
 
 ## How this repo is organised
 
@@ -157,8 +162,10 @@ upstream's project rather than this one, so most of them do not apply here.
 
 ## Related
 
-The hosts a cart runs on are listed at the top. Other engines and languages
-that target the same format:
+The hosts a cart runs on are listed at the top. - [wasmcart-defold-examples](https://github.com/wasmcart/wasmcart-defold-examples)
+  - carts built against this runtime, including five complete games
+
+Other engines and languages that target the same format:
 
 - [wasmcart-godot](https://github.com/wasmcart/wasmcart-godot) - Godot 4, the
   closest sibling to this repo and also a vendored engine
