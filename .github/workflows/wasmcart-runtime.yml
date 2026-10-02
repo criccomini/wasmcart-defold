@@ -1,9 +1,10 @@
 name: wasmcart runtime
 
-# Builds the cart runtime and publishes the three artifacts a game needs to be
-# packed into a .wasc: the engine wasm, bob (the content compiler) and the
-# builtins tree. wasmcart-defold-examples consumes these rather than rebuilding
-# the engine, which keeps that repo's CI to a couple of minutes.
+# Builds the cart runtime and publishes the engine wasm. That is the only
+# artifact this project produces: the content compiler (bob) and the builtins
+# tree are upstream Defold's, so consumers take them from Defold's own archive.
+# wasmcart-defold-examples downloads this engine rather than rebuilding it,
+# which keeps that repo's CI to a couple of minutes.
 on:
   push:
     branches: [main]
@@ -164,7 +165,7 @@ jobs:
       # Only the engine is published: bob.jar and builtins are upstream
       # Defold's, unmodified here, and consumers get them from Defold's own
       # archive instead of a copy redistributed under this project's name.
-      - name: Stage the toolchain
+      - name: Stage the engine
         run: |
           mkdir -p dist
           cp tmp/dynamo_home/bin/wasm-web/dmengine_wasmcart.wasm dist/
@@ -173,16 +174,17 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: wasmcart-defold-toolchain
+          name: wasmcart-defold-engine
           path: dist/
           retention-days: 30
 
-      # On a tagged release, attach the toolchain so the examples repo can
-      # fetch a stable version rather than the latest green build.
+      # On a tagged release, attach the engine so consumers can pin a version
+      # instead of chasing the latest green build. Uploaded bare: it is a
+      # single 3 MB file and a tarball would only add a step to unpack it.
       - name: Attach to the release
         if: github.event_name == 'release'
         run: |
-          tar czf wasmcart-defold-toolchain.tar.gz -C dist .
-          gh release upload "${GITHUB_REF_NAME}" wasmcart-defold-toolchain.tar.gz --clobber
+          gh release upload "${GITHUB_REF_NAME}" \
+            dist/dmengine_wasmcart.wasm dist/SHA256SUMS --clobber
         env:
           GH_TOKEN: ${{ github.token }}
