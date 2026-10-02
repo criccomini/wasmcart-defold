@@ -1,0 +1,77 @@
+name: wasmcart runtime
+
+# Builds the cart runtime and publishes the three artifacts a game needs to be
+# packed into a .wasc: the engine wasm, bob (the content compiler) and the
+# builtins tree. wasmcart-defold-examples consumes these rather than rebuilding
+# the engine, which keeps that repo's CI to a couple of minutes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'engine/**'
+      - 'scripts/**'
+      - '.github/workflows/wasmcart-runtime.yml'
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # build.py shells out to `git remote get-url origin` and aborts without
+      # one. actions/checkout leaves a remote in place, so this is a guard for
+      # workflow_dispatch on a detached state rather than the normal path.
+      - name: Ensure an origin remote exists
+        run: git remote get-url origin || git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+
+      - name: Install SDKs and external packages
+        run: ./scripts/build.py --platform=wasm-web install_ext
+
+      - name: Build the cart runtime
+        run: |
+          ./scripts/build.py --platform=wasm-web --skip-tests build_engine -- \
+            --skip-build-tests --with-wasmcart
+
+      # build.py has exited 0 after a fatal compile error before now, leaving a
+      # stale wasm in place. Assert the artifact exists and is plausibly sized
+      # rather than trusting the exit code.
+      - name: Verify the engine was actually produced
+        run: |
+          W=tmp/dynamo_home/bin/wasm-web/dmengine_wasmcart.wasm
+          test -f "$W" || { echo "no engine at $W"; exit 1; }
+          SZ=$(stat -c%s "$W")
+          echo "engine: $SZ bytes"
+          test "$SZ" -gt 1000000 || { echo "engine is implausibly small"; exit 1; }
+
+      - name: Stage the toolchain
+        run: |
+          mkdir -p dist
+          cp tmp/dynamo_home/bin/wasm-web/dmengine_wasmcart.wasm dist/
+          cp tmp/dynamo_home/share/java/bob-light.jar dist/
+          cp -a tmp/dynamo_home/content/builtins dist/builtins
+          (cd dist && sha256sum dmengine_wasmcart.wasm bob-light.jar > SHA256SUMS)
+          du -sh dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wasmcart-defold-toolchain
+          path: dist/
+          retention-days: 30
+
+      # On a tagged release, attach the toolchain so the examples repo can
+      # fetch a stable version rather than the latest green build.
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        run: |
+          tar czf wasmcart-defold-toolchain.tar.gz -C dist .
+          gh release upload "${GITHUB_REF_NAME}" wasmcart-defold-toolchain.tar.gz --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
