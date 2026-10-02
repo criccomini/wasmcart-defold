@@ -306,31 +306,70 @@ void wc_render(void)
     }
     dmTime::AdvanceVirtualTime(frame_us);
 
-    // Report pacing every ~2 s of cart time. A cart that feels slow is either
-    // being called rarely by the host or handed a tiny delta; printing the
-    // frame count and the average delta separates the two without guessing,
-    // and it travels with the cart so it works wherever the cart is run.
-    {
-        static uint32_t s_Frames  = 0;
-        static double   s_AccumMs = 0.0;
-        s_Frames  += 1;
-        s_AccumMs += (double) frame_us / 1000.0;
-        if (s_AccumMs >= 2000.0)
-        {
-            double avg_ms = s_AccumMs / (double) s_Frames;
-            char buf[160];
-            int n = snprintf(buf, sizeof(buf),
-                "wasmcart: %u frames, avg delta %.2f ms (%.1f fps)",
-                s_Frames, avg_ms, 1000.0 / avg_ms);
-            if (n > 0) wc_log(buf, (unsigned int) n);
-            s_Frames  = 0;
-            s_AccumMs = 0.0;
-        }
-    }
 
     // One engine tick per host frame. This is the inversion: upstream this
     // call sits inside RunLoop's while loop.
+    // Time the engine pass itself, so the report can say whether a slow frame
+    // is the cart working hard or the host simply not calling.
+    const uint64_t update_t0 = dmTime::GetMonotonicTime();
     dmEngine::UpdateResult result = (dmEngine::UpdateResult) dmEngineUpdate(g_Engine);
+    const uint64_t update_us = dmTime::GetMonotonicTime() - update_t0;
+
+    // Per-second report of where the frame time actually goes.
+    //
+    // "The game is slow" has several distinct causes and they need different
+    // fixes: the host may be calling rarely, the host may be calling often but
+    // handing tiny deltas, or the cart may be taking a long time inside
+    // dmEngineUpdate. Printing all three together tells them apart in one run.
+    //
+    // Keyed off the host's own wall clock (wc_time_t.time_ms) rather than the
+    // simulated clock, so "per second" means a real second. Both are printed:
+    // if simulated time runs behind real time the cart is being starved, and
+    // if it runs ahead the host is feeding deltas larger than it is pacing at.
+    {
+        static double   s_WallStartMs = -1.0;
+        static double   s_SimAccumMs  = 0.0;
+        static uint32_t s_Frames      = 0;
+        static uint64_t s_UpdateUsSum = 0;
+        static uint64_t s_UpdateUsMax = 0;
+        static double   s_DeltaMsMin  = 1e9;
+        static double   s_DeltaMsMax  = 0.0;
+
+        const double wall_ms = g_Time.time_ms;
+        if (s_WallStartMs < 0.0) s_WallStartMs = wall_ms;
+
+        const double delta_ms = (double) frame_us / 1000.0;
+        s_Frames      += 1;
+        s_SimAccumMs  += delta_ms;
+        s_UpdateUsSum += update_us;
+        if (update_us > s_UpdateUsMax) s_UpdateUsMax = update_us;
+        if (delta_ms < s_DeltaMsMin)   s_DeltaMsMin  = delta_ms;
+        if (delta_ms > s_DeltaMsMax)   s_DeltaMsMax  = delta_ms;
+
+        const double wall_elapsed = wall_ms - s_WallStartMs;
+        if (wall_elapsed >= 1000.0)
+        {
+            const double fps      = (double) s_Frames * 1000.0 / wall_elapsed;
+            const double avg_up   = (double) s_UpdateUsSum / (double) s_Frames / 1000.0;
+            const double busy_pct = (double) s_UpdateUsSum / 10.0 / wall_elapsed;
+            char buf[256];
+            int n = snprintf(buf, sizeof(buf),
+                "wasmcart: %.1f fps | %u frames in %.0f ms real, %.0f ms simulated | "
+                "delta min/avg/max %.1f/%.1f/%.1f ms | update avg %.2f ms max %.2f ms | cart busy %.0f%%",
+                fps, s_Frames, wall_elapsed, s_SimAccumMs,
+                s_DeltaMsMin, s_SimAccumMs / (double) s_Frames, s_DeltaMsMax,
+                avg_up, (double) s_UpdateUsMax / 1000.0, busy_pct);
+            if (n > 0) wc_log(buf, (unsigned int) n);
+
+            s_WallStartMs = wall_ms;
+            s_SimAccumMs  = 0.0;
+            s_Frames      = 0;
+            s_UpdateUsSum = 0;
+            s_UpdateUsMax = 0;
+            s_DeltaMsMin  = 1e9;
+            s_DeltaMsMax  = 0.0;
+        }
+    }
 
     // Keep the audio ring honest.
     //
