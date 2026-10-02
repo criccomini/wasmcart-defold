@@ -1786,17 +1786,31 @@ namespace dmEngine
         // initialization has completed, so startup work cannot expire the first
         // deadline before the application loop begins.
         engine->m_PreviousFrameTime = dmTime::GetMonotonicTime();
-        SetUpdateFrequency(engine, dmConfigFile::GetInt(engine->m_Config, "display.update_frequency", 0));
-
-        // A cart cannot honour a frame cap: the host calls wc_render and owns
-        // the cadence, so UseEngineFramePacing() is false and PaceFrame never
-        // runs. Say so rather than dropping the setting in silence, which reads
-        // as the engine ignoring game.project for no reason.
-        if (dmConfigFile::GetInt(engine->m_Config, "display.update_frequency", 0) != 0 && !UseEngineFramePacing())
+        // A cart cannot honour a frame cap and must not try to emulate one.
+        //
+        // A positive update_frequency selects the engine's FIXED-rate path, which
+        // accumulates elapsed time and derives num_steps from it. On a platform that
+        // owns its loop a timer keeps those in step. A cart has no timer: the host
+        // calls wc_render whenever it likes, so most calls have not accumulated a
+        // whole frame interval and yield num_steps == 0, meaning no update and no
+        // render -- a frame thrown away. Measured on a cart asking for 60 Hz: 418
+        // discarded frames against 62 that did any work, which the player sees as
+        // about 12 fps however fast the host is really calling.
+        //
+        // Force variable rate instead. dt is then the real elapsed time the host
+        // handed us and every call performs exactly one update, which is the correct
+        // reading of the ABI: the host owns the cadence, the cart renders when asked.
+        // fixed_update() is unaffected; it has its own frequency.
         {
-            dmLogWarning("display.update_frequency is set, but this platform does not pace frames: "
-                         "the host drives the frame rate. The setting is ignored.");
+        uint32_t requested_frequency = (uint32_t) dmConfigFile::GetInt(engine->m_Config, "display.update_frequency", 0);
+        if (requested_frequency != 0 && !UseEngineFramePacing())
+        {
+            dmLogWarning("display.update_frequency=%u is ignored: the host drives the frame rate on this platform.", requested_frequency);
+            requested_frequency = 0;
         }
+        SetUpdateFrequency(engine, (int32_t) requested_frequency);
+        }
+
 
         return true;
 
