@@ -50,30 +50,40 @@ jobs:
           } >> "$GITHUB_ENV"
 
       # Defold's own install_sdk pulls the Emscripten SDK from DM_PACKAGES_URL,
-      # which is one of upstream's private secrets and is not available here.
-      # Install the SDK directly instead, at the version Defold expects, and
-      # write the emscripten_config the build reads. This is what a local
-      # checkout does as well: its config points at a separate emsdk clone
-      # rather than at anything Defold downloaded.
-      - uses: mymindstorm/setup-emsdk@v16
-        with:
-          version: 4.0.6
-          actions-cache-folder: emsdk-cache
-
-      - name: Point Defold at the installed Emscripten
+      # one of upstream's private secrets, which this org does not have. Clone
+      # emsdk and install the version Defold expects instead.
+      #
+      # The whole SDK has to live at ext/SDKs/emsdk-<version>, not merely be on
+      # PATH: build_tools/sdk.py reads <emsdk>/node to find the node it runs
+      # emscripten with, so a config pointing elsewhere fails with
+      # FileNotFoundError on that directory. A local checkout symlinks the same
+      # path at its own emsdk clone.
+      - name: Install the Emscripten SDK
         run: |
           set -euo pipefail
-          mkdir -p tmp "$GITHUB_WORKSPACE/tmp/dynamo_home/ext/SDKs/emsdk-4.0.6"
-          cat > tmp/emscripten_config <<CONF
-          import os
-          emsdk_path = '${EMSDK}'
-          NODE_JS = '$(command -v node)'
-          LLVM_ROOT = emsdk_path + '/upstream/bin'
-          BINARYEN_ROOT = emsdk_path + '/upstream'
-          EMSCRIPTEN_ROOT = emsdk_path + '/upstream/emscripten'
-          CACHE = '$GITHUB_WORKSPACE/tmp/emcache'
-          CONF
-          sed -i 's/^          //' tmp/emscripten_config
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          "$HOME/emsdk/emsdk" install 4.0.6
+          "$HOME/emsdk/emsdk" activate 4.0.6
+          mkdir -p "$GITHUB_WORKSPACE/tmp/dynamo_home/ext/SDKs"
+          ln -sfn "$HOME/emsdk" "$GITHUB_WORKSPACE/tmp/dynamo_home/ext/SDKs/emsdk-4.0.6"
+          test -d "$HOME/emsdk/node" || { echo "::error::emsdk has no node/ directory; Defold needs it"; exit 1; }
+          ls "$HOME/emsdk/node"
+
+      - name: Write the Emscripten config Defold reads
+        run: |
+          set -euo pipefail
+          mkdir -p tmp
+          EM="$HOME/emsdk"
+          NODE_BIN=$(ls -d "$EM"/node/*/bin/node | head -1)
+          {
+            echo "import os"
+            echo "emsdk_path = '$EM'"
+            echo "NODE_JS = '$NODE_BIN'"
+            echo "LLVM_ROOT = emsdk_path + '/upstream/bin'"
+            echo "BINARYEN_ROOT = emsdk_path + '/upstream'"
+            echo "EMSCRIPTEN_ROOT = emsdk_path + '/upstream/emscripten'"
+            echo "CACHE = '$GITHUB_WORKSPACE/tmp/emcache'"
+          } > tmp/emscripten_config
           cat tmp/emscripten_config
 
       - name: Install external packages
