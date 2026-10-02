@@ -5,13 +5,20 @@ name: wasmcart runtime
 # tree are upstream Defold's, so consumers take them from Defold's own archive.
 # wasmcart-defold-examples downloads this engine rather than rebuilding it,
 # which keeps that repo's CI to a couple of minutes.
+# Triggered only by changes that can alter the binary. The build takes about
+# forty minutes, and a commit touching just this file used to spend all of it
+# re-emitting a byte-identical wasm: six such commits did exactly that. Edit
+# the workflow and run it from the Actions tab (workflow_dispatch) to check a
+# CI change without rebuilding on every push.
 on:
   push:
     branches: [main]
     paths:
       - 'engine/**'
-      - 'scripts/**'
-      - '.github/workflows/wasmcart-runtime.yml'
+      - 'ext/**'
+      - 'share/**'
+      - 'build_tools/**'
+      - 'scripts/build.py'
   workflow_dispatch:
   release:
     types: [published]
