@@ -32,8 +32,40 @@ jobs:
       - name: Ensure an origin remote exists
         run: git remote get-url origin || git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
 
+      # build.py reads these from the environment and refuses to run without
+      # them. `build.py shell` sets them by spawning an interactive shell, and
+      # dmenv.sh is generated rather than committed, so neither is usable from
+      # a workflow: set them directly instead.
+      - name: Set the Defold build environment
+        run: |
+          {
+            echo "DEFOLD_HOME=$GITHUB_WORKSPACE"
+            echo "DYNAMO_HOME=$GITHUB_WORKSPACE/tmp/dynamo_home"
+            echo "PYTHONPATH=$GITHUB_WORKSPACE/tmp/dynamo_home/lib/python:$GITHUB_WORKSPACE/build_tools:$GITHUB_WORKSPACE/tmp/dynamo_home/ext/lib/python"
+            echo "PYTHONIOENCODING=UTF-8"
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/tmp/dynamo_home/lib/wasm-web:$GITHUB_WORKSPACE/tmp/dynamo_home/ext/lib/x86_64-linux"
+            echo "CMAKE_GENERATOR=Ninja"
+            echo "EM_CONFIG=$GITHUB_WORKSPACE/tmp/emscripten_config"
+            echo "EM_CACHE=$GITHUB_WORKSPACE/tmp/emcache"
+          } >> "$GITHUB_ENV"
+
       - name: Install SDKs and external packages
         run: ./scripts/build.py --platform=wasm-web install_ext
+
+      # install_ext unpacks the JDK and the toolchain binaries, so these can
+      # only be resolved once it has run.
+      - name: Add the installed toolchain to PATH
+        run: |
+          JDK=$(ls -d "$GITHUB_WORKSPACE"/tmp/jdk/*/ 2>/dev/null | head -1)
+          [ -n "$JDK" ] && echo "JAVA_HOME=${JDK%/}" >> "$GITHUB_ENV"
+          {
+            echo "$GITHUB_WORKSPACE/tmp/bin"
+            [ -n "$JDK" ] && echo "${JDK%/}/bin"
+            echo "$GITHUB_WORKSPACE/tmp/dynamo_home/bin/wasm-web"
+            echo "$GITHUB_WORKSPACE/tmp/dynamo_home/bin"
+            echo "$GITHUB_WORKSPACE/tmp/dynamo_home/ext/bin"
+            echo "$GITHUB_WORKSPACE/tmp/dynamo_home/ext/bin/x86_64-linux"
+          } >> "$GITHUB_PATH"
 
       - name: Build the cart runtime
         run: |
