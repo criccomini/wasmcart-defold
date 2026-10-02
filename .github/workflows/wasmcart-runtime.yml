@@ -32,7 +32,7 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
 
       # build.py shells out to `git remote get-url origin` and aborts without
       # one. actions/checkout leaves a remote in place, so this is a guard for
