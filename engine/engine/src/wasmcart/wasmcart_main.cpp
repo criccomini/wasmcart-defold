@@ -315,61 +315,7 @@ void wc_render(void)
     dmEngine::UpdateResult result = (dmEngine::UpdateResult) dmEngineUpdate(g_Engine);
     const uint64_t update_us = dmTime::GetMonotonicTime() - update_t0;
 
-    // Per-second report of where the frame time actually goes.
-    //
-    // "The game is slow" has several distinct causes and they need different
-    // fixes: the host may be calling rarely, the host may be calling often but
-    // handing tiny deltas, or the cart may be taking a long time inside
-    // dmEngineUpdate. Printing all three together tells them apart in one run.
-    //
-    // Keyed off the host's own wall clock (wc_time_t.time_ms) rather than the
-    // simulated clock, so "per second" means a real second. Both are printed:
-    // if simulated time runs behind real time the cart is being starved, and
-    // if it runs ahead the host is feeding deltas larger than it is pacing at.
-    {
-        static double   s_WallStartMs = -1.0;
-        static double   s_SimAccumMs  = 0.0;
-        static uint32_t s_Frames      = 0;
-        static uint64_t s_UpdateUsSum = 0;
-        static uint64_t s_UpdateUsMax = 0;
-        static double   s_DeltaMsMin  = 1e9;
-        static double   s_DeltaMsMax  = 0.0;
 
-        const double wall_ms = g_Time.time_ms;
-        if (s_WallStartMs < 0.0) s_WallStartMs = wall_ms;
-
-        const double delta_ms = (double) frame_us / 1000.0;
-        s_Frames      += 1;
-        s_SimAccumMs  += delta_ms;
-        s_UpdateUsSum += update_us;
-        if (update_us > s_UpdateUsMax) s_UpdateUsMax = update_us;
-        if (delta_ms < s_DeltaMsMin)   s_DeltaMsMin  = delta_ms;
-        if (delta_ms > s_DeltaMsMax)   s_DeltaMsMax  = delta_ms;
-
-        const double wall_elapsed = wall_ms - s_WallStartMs;
-        if (wall_elapsed >= 1000.0)
-        {
-            const double fps      = (double) s_Frames * 1000.0 / wall_elapsed;
-            const double avg_up   = (double) s_UpdateUsSum / (double) s_Frames / 1000.0;
-            const double busy_pct = (double) s_UpdateUsSum / 10.0 / wall_elapsed;
-            char buf[256];
-            int n = snprintf(buf, sizeof(buf),
-                "wasmcart: %.1f fps | %u frames in %.0f ms real, %.0f ms simulated | "
-                "delta min/avg/max %.1f/%.1f/%.1f ms | update avg %.2f ms max %.2f ms | cart busy %.0f%%",
-                fps, s_Frames, wall_elapsed, s_SimAccumMs,
-                s_DeltaMsMin, s_SimAccumMs / (double) s_Frames, s_DeltaMsMax,
-                avg_up, (double) s_UpdateUsMax / 1000.0, busy_pct);
-            if (n > 0) wc_log(buf, (unsigned int) n);
-
-            s_WallStartMs = wall_ms;
-            s_SimAccumMs  = 0.0;
-            s_Frames      = 0;
-            s_UpdateUsSum = 0;
-            s_UpdateUsMax = 0;
-            s_DeltaMsMin  = 1e9;
-            s_DeltaMsMax  = 0.0;
-        }
-    }
 
     // Keep the audio ring honest.
     //
@@ -384,7 +330,10 @@ void wc_render(void)
     // discarding four frames in five. Write silence for the frames the mixer
     // did not cover, so the cursor advances at the rate the declaration
     // promises whether or not a sound happens to be playing.
+    uint64_t audio_us = 0;
+    uint32_t audio_written = 0;
     {
+        const uint64_t audio_t0 = dmTime::GetMonotonicTime();
         const uint32_t rate   = g_HostInfo.audio_sample_rate ? g_HostInfo.audio_sample_rate : 48000;
         const uint32_t ring   = dmDeviceWasmcart::GetRingFrameCount();
         // Exactly the audio this frame covers, scaled by the delta the host
@@ -415,7 +364,108 @@ void wc_render(void)
             cursor = (cursor + pad) % ring;
             dmDeviceWasmcart::g_AudioWriteCursor = cursor;
         }
+        audio_written = (uint32_t)((cursor - s_LastCursor) % ring);
         s_LastCursor = cursor;
+        audio_us = dmTime::GetMonotonicTime() - audio_t0;
+    }
+
+    // Per-second report of everything the cart can see about its own frame.
+    //
+    // A cart cannot time the host's blit or its vsync wait, but it can time
+    // every phase on its own side and, crucially, the GAP: the wall-clock time
+    // between one wc_render returning and the next one starting. That gap is
+    // all host: present, swap, event loop, audio queue, anything else. If the
+    // cart is fast and the gap is large, the cart is not the problem, and the
+    // size and shape of the gap says which part of the host to look at.
+    //
+    // Keyed off the host's wall clock (wc_time_t.time_ms), so a second here is
+    // a real second.
+    {
+        static double   s_WallStartMs  = -1.0;
+        static double   s_PrevWallMs   = -1.0;
+        static double   s_SimAccumMs   = 0.0;
+        static uint32_t s_Frames       = 0;
+        static uint64_t s_UpdateUsSum  = 0;
+        static uint64_t s_UpdateUsMax  = 0;
+        static uint64_t s_AudioUsSum   = 0;
+        static double   s_DeltaMsMin   = 1e9;
+        static double   s_DeltaMsMax   = 0.0;
+        static double   s_GapMsSum     = 0.0;
+        static double   s_GapMsMax     = 0.0;
+        static uint32_t s_GapOver33    = 0;
+        static uint32_t s_GapOver100   = 0;
+        static uint32_t s_AudioFrames  = 0;
+        static uint32_t s_AudioSamples = 0;
+
+        const double wall_ms = g_Time.time_ms;
+        if (s_WallStartMs < 0.0) s_WallStartMs = wall_ms;
+
+        // Gap = wall time since the END of the previous wc_render. Everything
+        // the host did between frames lands here.
+        if (s_PrevWallMs >= 0.0)
+        {
+            const double gap = wall_ms - s_PrevWallMs;
+            s_GapMsSum += gap;
+            if (gap > s_GapMsMax) s_GapMsMax = gap;
+            if (gap > 33.0)  s_GapOver33++;
+            if (gap > 100.0) s_GapOver100++;
+        }
+
+        const double delta_ms = (double) frame_us / 1000.0;
+        s_Frames       += 1;
+        s_SimAccumMs   += delta_ms;
+        s_UpdateUsSum  += update_us;
+        s_AudioUsSum   += audio_us;
+        s_AudioSamples += audio_written;
+        if (audio_written) s_AudioFrames++;
+        if (update_us > s_UpdateUsMax) s_UpdateUsMax = update_us;
+        if (delta_ms < s_DeltaMsMin)   s_DeltaMsMin  = delta_ms;
+        if (delta_ms > s_DeltaMsMax)   s_DeltaMsMax  = delta_ms;
+
+        const double wall_elapsed = wall_ms - s_WallStartMs;
+        if (wall_elapsed >= 1000.0)
+        {
+            const double fn      = (double) s_Frames;
+            const double fps     = fn * 1000.0 / wall_elapsed;
+            const double avg_up  = (double) s_UpdateUsSum / fn / 1000.0;
+            const double avg_au  = (double) s_AudioUsSum / fn / 1000.0;
+            const double cart_ms = (double)(s_UpdateUsSum + s_AudioUsSum) / 1000.0;
+            const double gap_ms  = s_GapMsSum;
+            char buf[512];
+            int n = snprintf(buf, sizeof(buf),
+                "wasmcart: %.1f fps | %u frames in %.0f ms real / %.0f ms simulated\n"
+                "  delta   min %.1f avg %.1f max %.1f ms\n"
+                "  update  avg %.3f max %.3f ms | audio avg %.3f ms\n"
+                "  IN CART %.0f ms of %.0f ms (%.0f%%)\n"
+                "  GAP     avg %.1f max %.1f ms, %.0f%% of the second, %u over 33 ms, %u over 100 ms\n"
+                "  audio   %u/%u frames wrote %u samples (%.2fx realtime)",
+                fps, s_Frames, wall_elapsed, s_SimAccumMs,
+                s_DeltaMsMin, s_SimAccumMs / fn, s_DeltaMsMax,
+                avg_up, (double) s_UpdateUsMax / 1000.0, avg_au,
+                cart_ms, wall_elapsed, cart_ms * 100.0 / wall_elapsed,
+                gap_ms / fn, s_GapMsMax, gap_ms * 100.0 / wall_elapsed,
+                s_GapOver33, s_GapOver100,
+                s_AudioFrames, s_Frames, s_AudioSamples,
+                ((double) s_AudioSamples / (double)(g_HostInfo.audio_sample_rate ? g_HostInfo.audio_sample_rate : 48000))
+                    / (wall_elapsed / 1000.0));
+            if (n > 0) wc_log(buf, (unsigned int) n);
+
+            s_WallStartMs  = wall_ms;
+            s_SimAccumMs   = 0.0;
+            s_Frames       = 0;
+            s_UpdateUsSum  = 0;
+            s_UpdateUsMax  = 0;
+            s_AudioUsSum   = 0;
+            s_DeltaMsMin   = 1e9;
+            s_DeltaMsMax   = 0.0;
+            s_GapMsSum     = 0.0;
+            s_GapMsMax     = 0.0;
+            s_GapOver33    = 0;
+            s_GapOver100   = 0;
+            s_AudioFrames  = 0;
+            s_AudioSamples = 0;
+        }
+        s_PrevWallMs = wall_ms;
     }
 
     if (dmEngine::RESULT_OK != result)
