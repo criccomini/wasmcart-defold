@@ -161,13 +161,14 @@ jobs:
           echo "engine: $SZ bytes"
           test "$SZ" -gt 1000000 || { echo "engine is implausibly small"; exit 1; }
 
+      # Only the engine is published: bob.jar and builtins are upstream
+      # Defold's, unmodified here, and consumers get them from Defold's own
+      # archive instead of a copy redistributed under this project's name.
       - name: Stage the toolchain
         run: |
           mkdir -p dist
           cp tmp/dynamo_home/bin/wasm-web/dmengine_wasmcart.wasm dist/
-          cp tmp/dynamo_home/share/java/bob-light.jar dist/
-          cp -a tmp/dynamo_home/content/builtins dist/builtins
-          (cd dist && sha256sum dmengine_wasmcart.wasm bob-light.jar > SHA256SUMS)
+          (cd dist && sha256sum dmengine_wasmcart.wasm > SHA256SUMS)
           du -sh dist
 
       - uses: actions/upload-artifact@v7
