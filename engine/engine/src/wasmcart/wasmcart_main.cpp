@@ -332,6 +332,45 @@ void wc_render(void)
     // call sits inside RunLoop's while loop.
     dmEngine::UpdateResult result = (dmEngine::UpdateResult) dmEngineUpdate(g_Engine);
 
+    // Keep the audio ring honest.
+    //
+    // wc_info_t advertises audio_cap, which tells the host this cart produces
+    // audio. Defold only runs its mixer while something is playing (DEF-3130
+    // does not even start the device otherwise), so between sounds the write
+    // cursor stands still while the host keeps draining -- the cart claims a
+    // stream it is not supplying.
+    //
+    // A host that paces on audio then sees a ring that never fills. The node
+    // player stepped five frames per presented one because of exactly this,
+    // discarding four frames in five. Write silence for the frames the mixer
+    // did not cover, so the cursor advances at the rate the declaration
+    // promises whether or not a sound happens to be playing.
+    {
+        const uint32_t rate   = g_HostInfo.audio_sample_rate ? g_HostInfo.audio_sample_rate : 48000;
+        const uint32_t ring   = dmDeviceWasmcart::GetRingFrameCount();
+        // One frame of audio at the cart's nominal rate. Deliberately NOT
+        // scaled by the host's delta: headless the delta can be microseconds,
+        // which would pad a handful of samples and leave the ring just as
+        // empty. The host consumes a steady stream, so supply one.
+        const uint32_t want   = rate / 60u;
+        static uint32_t s_LastCursor = 0;
+        uint32_t cursor = dmDeviceWasmcart::g_AudioWriteCursor;
+        uint32_t wrote  = (cursor - s_LastCursor) % ring;
+        if (wrote < want)
+        {
+            uint32_t pad = want - wrote;
+            for (uint32_t i = 0; i < pad; ++i)
+            {
+                const uint32_t idx = ((cursor + i) % ring) * 2;
+                dmDeviceWasmcart::g_AudioRing[idx]     = 0.0f;
+                dmDeviceWasmcart::g_AudioRing[idx + 1] = 0.0f;
+            }
+            cursor = (cursor + pad) % ring;
+            dmDeviceWasmcart::g_AudioWriteCursor = cursor;
+        }
+        s_LastCursor = cursor;
+    }
+
     if (dmEngine::RESULT_OK != result)
     {
         int run_action = 0;
