@@ -18,7 +18,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
 
@@ -136,6 +136,14 @@ jobs:
             echo "$GITHUB_WORKSPACE/tmp/dynamo_home/ext/bin"
             echo "$GITHUB_WORKSPACE/tmp/dynamo_home/ext/bin/x86_64-linux"
           } >> "$GITHUB_PATH"
+
+      # The engine links against Bullet, Box2D and the other external libraries,
+      # which are built per target platform. A developer tree already has them
+      # under ext/lib/wasm-web from an earlier run; a fresh checkout does not,
+      # and configure fails with "Missing libBulletDynamics.a. Run
+      # ./scripts/build.py --platform=wasm-web build_ext first."
+      - name: Build the external libraries
+        run: ./scripts/build.py --platform=wasm-web build_ext
 
       - name: Build the cart runtime
         run: |
