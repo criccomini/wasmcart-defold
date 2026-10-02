@@ -26,6 +26,14 @@ jobs:
         with:
           python-version: '3.12'
 
+      # cmake's FindJava has to locate a JDK. Installing one explicitly keeps
+      # this independent of whatever a particular developer's tree happens to
+      # contain under tmp/.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
       # build.py shells out to `git remote get-url origin` and aborts without
       # one. actions/checkout leaves a remote in place, so this is a guard for
       # workflow_dispatch on a detached state rather than the normal path.
@@ -93,6 +101,9 @@ jobs:
       # only be resolved once it has run.
       - name: Add the installed toolchain to PATH
         run: |
+          # JAVA_HOME comes from setup-java. Defold's own tree may also ship a
+          # JDK under tmp/jdk on a developer machine; prefer that when present
+          # so CI and a local checkout agree, but do not require it.
           JDK=$(ls -d "$GITHUB_WORKSPACE"/tmp/jdk/*/ 2>/dev/null | head -1)
           [ -n "$JDK" ] && echo "JAVA_HOME=${JDK%/}" >> "$GITHUB_ENV"
           {
