@@ -586,7 +586,31 @@ if(TARGET_PLATFORM_OS STREQUAL "web" AND DEFOLD_WASMCART)
   # DEFOLD_WASMCART configure, so no per-target override is needed here.
   engine_configure_executable(dmengine_wasmcart release engine_release engine_service_null graphics "profile_null;profilerext_null" "ProfilerExt")
 
-  target_compile_definitions(dmengine_wasmcart PRIVATE DM_PLATFORM_WASMCART)
+  # Stamp the build into the binary. ENGINE_SHA1 above is resolved when CMake
+  # configures and is reused by every later incremental build, so it can name a
+  # commit this binary does not contain. Resolve the sha again here, at build
+  # time, and mark it -dirty when the tree has uncommitted changes, so the
+  # banner the cart prints always describes the bytes that are running.
+  execute_process(
+    COMMAND git -c "safe.directory=${DEFOLD_HOME}" -C "${DEFOLD_HOME}" rev-parse --short HEAD
+    OUTPUT_VARIABLE WASMCART_BUILD_SHA
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+  if(NOT WASMCART_BUILD_SHA)
+    set(WASMCART_BUILD_SHA "nogit")
+  endif()
+  execute_process(
+    COMMAND git -c "safe.directory=${DEFOLD_HOME}" -C "${DEFOLD_HOME}" status --porcelain
+    OUTPUT_VARIABLE WASMCART_BUILD_DIRTY
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+  if(WASMCART_BUILD_DIRTY)
+    set(WASMCART_BUILD_SHA "${WASMCART_BUILD_SHA}-dirty")
+  endif()
+
+  target_compile_definitions(dmengine_wasmcart PRIVATE DM_PLATFORM_WASMCART
+    WASMCART_BUILD="${WASMCART_BUILD_SHA}"
+    WASMCART_VERSION="${ENGINE_VERSION}")
   target_include_directories(dmengine_wasmcart PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../platform/src")
 
   # Standalone wasm: no JS glue, no entry point, only the cart ABI exported.

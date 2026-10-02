@@ -24,6 +24,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include "engine_version.h"
 
 #include "engine.h"
 #include "engine_private.h"
@@ -106,6 +107,13 @@ static dmPlatform::WasmcartInputState g_InputState;
 // Fallback frame length, used only for the very first frame and if a host ever
 // reports a non-positive delta. Real pacing comes from wc_time_t.delta_ms,
 // which the host writes before every wc_render.
+#ifndef WASMCART_BUILD
+#define WASMCART_BUILD "unstamped"
+#endif
+#ifndef WASMCART_VERSION
+#define WASMCART_VERSION "0.0.0"
+#endif
+
 #define WASMCART_FRAME_US (1000000 / 60)
 
 // The host already clamps delta_ms (the reference hosts cap it at 250 ms), but
@@ -246,6 +254,19 @@ void wc_init(void)
         return;
     }
     g_EngineAlive = true;
+
+    // Stamp the build into the cart's own log. The engine prints a Defold
+    // version too, but that sha is captured when CMake configures and goes
+    // stale across incremental builds, so it can name a commit the binary does
+    // not contain. WASMCART_BUILD is injected per compile, which makes it the
+    // figure to trust when checking which cart you are actually running.
+    {
+        char buf[192];
+        int n = snprintf(buf, sizeof(buf),
+            "wasmcart-defold %s build %s (defold %s)",
+            WASMCART_VERSION, WASMCART_BUILD, dmEngineVersion::VERSION);
+        if (n > 0) wc_log(buf, (unsigned int) n);
+    }
 }
 
 __attribute__((export_name("wc_render")))
@@ -284,6 +305,28 @@ void wc_render(void)
         }
     }
     dmTime::AdvanceVirtualTime(frame_us);
+
+    // Report pacing every ~2 s of cart time. A cart that feels slow is either
+    // being called rarely by the host or handed a tiny delta; printing the
+    // frame count and the average delta separates the two without guessing,
+    // and it travels with the cart so it works wherever the cart is run.
+    {
+        static uint32_t s_Frames  = 0;
+        static double   s_AccumMs = 0.0;
+        s_Frames  += 1;
+        s_AccumMs += (double) frame_us / 1000.0;
+        if (s_AccumMs >= 2000.0)
+        {
+            double avg_ms = s_AccumMs / (double) s_Frames;
+            char buf[160];
+            int n = snprintf(buf, sizeof(buf),
+                "wasmcart: %u frames, avg delta %.2f ms (%.1f fps)",
+                s_Frames, avg_ms, 1000.0 / avg_ms);
+            if (n > 0) wc_log(buf, (unsigned int) n);
+            s_Frames  = 0;
+            s_AccumMs = 0.0;
+        }
+    }
 
     // One engine tick per host frame. This is the inversion: upstream this
     // call sits inside RunLoop's while loop.
