@@ -103,10 +103,16 @@ static uint8_t                     g_Keys[32];
 static dmPlatform::WasmcartInputState g_InputState;
 
 // Default cart resolution, overridden by the host's preference in wc_init().
-// One host frame of virtual time. 60 Hz is the wasmcart frame contract; a
-// host that steps slower still gets a consistent timeline, just slower wall
-// time, which is the correct behaviour for a deterministic cart.
+// Fallback frame length, used only for the very first frame and if a host ever
+// reports a non-positive delta. Real pacing comes from wc_time_t.delta_ms,
+// which the host writes before every wc_render.
 #define WASMCART_FRAME_US (1000000 / 60)
+
+// The host already clamps delta_ms (the reference hosts cap it at 250 ms), but
+// a cart cannot assume that of every host, so clamp again here: a stall that
+// reaches the simulation moves a frame's worth of velocity in one step and
+// tunnels straight through collisions.
+#define WASMCART_MAX_FRAME_US (250 * 1000)
 
 #define WASMCART_DEFAULT_WIDTH  960
 #define WASMCART_DEFAULT_HEIGHT 540
@@ -250,13 +256,34 @@ void wc_render(void)
         return;
     }
 
-    // Advance the VIRTUAL clock by one frame BEFORE the engine reads it. The
-    // engine computes its frame delta from dmTime::GetMonotonicTime(), which on
-    // a cart is virtual precisely so the timeline follows host stepping rather
-    // than wall-clock time (see time_posix.cpp). Without this every dt-driven
-    // system - timers, physics, go.animate, particle simulation - sits still
-    // while rendering and input appear to work.
-    dmTime::AdvanceVirtualTime(WASMCART_FRAME_US);
+    // Advance the VIRTUAL clock BEFORE the engine reads it. The engine computes
+    // its frame delta from dmTime::GetMonotonicTime(), which on a cart is
+    // virtual precisely so the timeline follows host stepping rather than
+    // wall-clock time (see time_posix.cpp). Without this every dt-driven system
+    // - timers, physics, go.animate, particle simulation - sits still while
+    // rendering and input appear to work.
+    //
+    // The step is the host's own delta_ms, not a fixed 1/60. A hardcoded step
+    // makes the cart run at half speed on a 120 Hz host and at double speed on
+    // a 30 Hz one, because the simulated time per call no longer matches the
+    // rate the host actually calls at. wc_time_t is the ABI's clock and the
+    // spec requires a cart to take its timing from it.
+    uint64_t frame_us = WASMCART_FRAME_US;
+    if (g_Time.delta_ms > 0.0)
+    {
+        frame_us = (uint64_t)(g_Time.delta_ms * 1000.0);
+        if (frame_us > WASMCART_MAX_FRAME_US)
+        {
+            frame_us = WASMCART_MAX_FRAME_US;
+        }
+        if (frame_us == 0)
+        {
+            // Sub-microsecond frame: still advance, or a fast host freezes the
+            // timeline entirely by always rounding down to zero.
+            frame_us = 1;
+        }
+    }
+    dmTime::AdvanceVirtualTime(frame_us);
 
     // One engine tick per host frame. This is the inversion: upstream this
     // call sits inside RunLoop's while loop.
