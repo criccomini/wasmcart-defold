@@ -23,6 +23,12 @@ on:
   release:
     types: [published]
 
+# The release step uploads an asset, which needs write access to contents.
+# Without it the job builds fine and then fails with
+# "HTTP 403: Resource not accessible by integration".
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -188,10 +194,21 @@ jobs:
       # On a tagged release, attach the engine so consumers can pin a version
       # instead of chasing the latest green build. Uploaded bare: it is a
       # single 3 MB file and a tarball would only add a step to unpack it.
+      # Attach the engine only when the release does not already carry one.
+      # A release cut by hand ships a binary that was built and checked against
+      # the examples; clobbering it here would replace the tested artifact with
+      # an untested rebuild of the same commit.
       - name: Attach to the release
         if: github.event_name == 'release'
         run: |
+          set -euo pipefail
+          if gh release view "${GITHUB_REF_NAME}" \
+               --json assets --jq '.assets[].name' \
+             | grep -qx 'dmengine_wasmcart.wasm'; then
+            echo "release ${GITHUB_REF_NAME} already has dmengine_wasmcart.wasm; leaving it alone"
+            exit 0
+          fi
           gh release upload "${GITHUB_REF_NAME}" \
-            dist/dmengine_wasmcart.wasm dist/SHA256SUMS --clobber
+            dist/dmengine_wasmcart.wasm dist/SHA256SUMS
         env:
           GH_TOKEN: ${{ github.token }}
