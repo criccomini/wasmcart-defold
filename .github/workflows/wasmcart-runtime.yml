@@ -49,11 +49,32 @@ jobs:
             echo "EM_CACHE=$GITHUB_WORKSPACE/tmp/emcache"
           } >> "$GITHUB_ENV"
 
-      # install_ext unpacks the prebuilt packages; the Emscripten SDK is a
-      # separate download and the build aborts with "Failed to find local EMSDK
-      # installation" without it.
-      - name: Install the Emscripten SDK
-        run: ./scripts/build.py --platform=wasm-web install_sdk
+      # Defold's own install_sdk pulls the Emscripten SDK from DM_PACKAGES_URL,
+      # which is one of upstream's private secrets and is not available here.
+      # Install the SDK directly instead, at the version Defold expects, and
+      # write the emscripten_config the build reads. This is what a local
+      # checkout does as well: its config points at a separate emsdk clone
+      # rather than at anything Defold downloaded.
+      - uses: mymindstorm/setup-emsdk@v16
+        with:
+          version: 4.0.6
+          actions-cache-folder: emsdk-cache
+
+      - name: Point Defold at the installed Emscripten
+        run: |
+          set -euo pipefail
+          mkdir -p tmp "$GITHUB_WORKSPACE/tmp/dynamo_home/ext/SDKs/emsdk-4.0.6"
+          cat > tmp/emscripten_config <<CONF
+          import os
+          emsdk_path = '${EMSDK}'
+          NODE_JS = '$(command -v node)'
+          LLVM_ROOT = emsdk_path + '/upstream/bin'
+          BINARYEN_ROOT = emsdk_path + '/upstream'
+          EMSCRIPTEN_ROOT = emsdk_path + '/upstream/emscripten'
+          CACHE = '$GITHUB_WORKSPACE/tmp/emcache'
+          CONF
+          sed -i 's/^          //' tmp/emscripten_config
+          cat tmp/emscripten_config
 
       - name: Install external packages
         run: ./scripts/build.py --platform=wasm-web install_ext
