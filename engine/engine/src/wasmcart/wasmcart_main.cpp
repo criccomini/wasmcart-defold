@@ -387,11 +387,19 @@ void wc_render(void)
     {
         const uint32_t rate   = g_HostInfo.audio_sample_rate ? g_HostInfo.audio_sample_rate : 48000;
         const uint32_t ring   = dmDeviceWasmcart::GetRingFrameCount();
-        // One frame of audio at the cart's nominal rate. Deliberately NOT
-        // scaled by the host's delta: headless the delta can be microseconds,
-        // which would pad a handful of samples and leave the ring just as
-        // empty. The host consumes a steady stream, so supply one.
-        const uint32_t want   = rate / 60u;
+        // Exactly the audio this frame covers, scaled by the delta the host
+        // handed over. A fixed 1/60 s per call looks right only while the host
+        // calls at 60 Hz: call twice as often and the cart emits audio at twice
+        // realtime, the device cannot drain it, and a host that throttles on a
+        // full audio queue then starves the cart of frames. That is not
+        // hypothetical -- it pinned every example at 11.7 fps.
+        //
+        // The device drains in realtime, so the cart must produce in realtime.
+        uint32_t want = (uint32_t)(((uint64_t) rate * frame_us) / 1000000u);
+        // A host stepping far faster than realtime (a headless harness) yields
+        // a sub-sample delta. Emitting nothing is correct there: the ring is
+        // not a heartbeat, it is a stream, and there is no stream to supply.
+        if (want > ring) want = ring;
         static uint32_t s_LastCursor = 0;
         uint32_t cursor = dmDeviceWasmcart::g_AudioWriteCursor;
         uint32_t wrote  = (cursor - s_LastCursor) % ring;
