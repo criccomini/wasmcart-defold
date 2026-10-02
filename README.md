@@ -3,16 +3,33 @@
 **Write games in Defold. Ship them as wasmcart cartridges.**
 
 The [Defold](https://defold.com) engine compiled to standalone WebAssembly as a
-[wasmcart](https://github.com/wasmcart/wasmcart) runtime. One
-`dmengine_wasmcart.wasm` is built once; any Defold game becomes a cart by
-packing its bob output beside it. The same `.wasc` runs on every wasmcart host.
+[wasmcart](https://github.com/wasmcart/wasmcart) runtime.
+
+[wasmcart](https://github.com/wasmcart/wasmcart) is a virtual cartridge format:
+a `.wasc` file holds a WebAssembly program plus its assets, and runs unmodified
+on any host that implements the ABI. No installer, no platform build, no
+browser.
+
+So the engine is built **once** into `dmengine_wasmcart.wasm`, and any Defold
+game becomes a cart by packing its bob output beside it. That one `.wasc` then
+runs everywhere a wasmcart host exists:
+
+- [wasmcart](https://github.com/wasmcart/wasmcart) - the JS reference host,
+  Node and browsers
+- [wasmcart-native](https://github.com/wasmcart/wasmcart-native) - a standalone
+  desktop player (libnode/V8, SDL2, EGL)
+- [wasmcart-libretro](https://github.com/wasmcart/wasmcart-libretro) - a
+  RetroArch core, so carts run anywhere RetroArch does
+- [wasmcart-android](https://github.com/wasmcart/wasmcart-android) - a
+  standalone Android player
 
 This is Defold without a browser. Defold's own HTML5 export needs a DOM, a
-WebGL canvas and JS glue; this is standalone WASM with none of that.
+WebGL canvas and JS glue; this is standalone WASM with none of that, which is
+why it reaches hosts Defold has no export for.
 
 Upstream Defold is **vendored, not forked** (see
 [How this repo is organised](#how-this-repo-is-organised)). Upstream's own
-README is kept as `README_DEFOLD.md`.
+README is kept as [`docs/upstream/README_DEFOLD.md`](docs/upstream/README_DEFOLD.md).
 
 ## What works
 
@@ -42,7 +59,7 @@ Known limits, both Defold's rather than this port's:
 ## Building the runtime
 
 Requires a Linux host with the Defold build prerequisites (see
-`README_BUILD.md`, upstream's own instructions).
+[`docs/README_BUILD.md`](docs/README_BUILD.md), upstream's own instructions).
 
 ```bash
 git remote add origin <this repo>   # see below: the build shells out to git
@@ -126,29 +143,33 @@ and the host clock are all wired.
 `wc_get_info` is idempotent: a host may call it again after `wc_init` to pick up
 the resolved resolution, and some do.
 
+## Docs
+
+- [docs/README_BUILD.md](docs/README_BUILD.md) - building the engine
+- [docs/README_SETUP.md](docs/README_SETUP.md) - toolchain and SDK setup
+- [docs/README_EMSCRIPTEN.md](docs/README_EMSCRIPTEN.md) - the Emscripten
+  toolchain this target is built with
+- [docs/README_DEBUGGING.md](docs/README_DEBUGGING.md) - debugging the engine
+
+`docs/upstream/` holds Defold's own project docs (contribution guide, release
+process, iOS and Android notes, CI). They are kept for provenance and describe
+upstream's project rather than this one, so most of them do not apply here.
+
 ## Related
 
-The cart format and its reference host:
-
-- [wasmcart](https://github.com/wasmcart/wasmcart) - the `.wasc` format, the
-  spec, and the JS reference host
-- [wasmcart-native](https://github.com/wasmcart/wasmcart-native) - standalone
-  C++ player on libnode/V8, SDL2 and EGL
-- [wasmcart-libretro](https://github.com/wasmcart/wasmcart-libretro) - carts as
-  a RetroArch core
-- [wasmcart-android](https://github.com/wasmcart/wasmcart-android) - standalone
-  Android player
-
-Other engines and languages targeting the same format:
+The hosts a cart runs on are listed at the top. Other engines and languages
+that target the same format:
 
 - [wasmcart-godot](https://github.com/wasmcart/wasmcart-godot) - Godot 4, the
-  closest sibling to this repo
+  closest sibling to this repo and also a vendored engine
 - [wasmcart-lua](https://github.com/wasmcart/wasmcart-lua) - Lua 5.4 with a
   LOVE-style API
+- [wasmcart-pygame](https://github.com/wasmcart/wasmcart-pygame) - CPython 3.13
+  and pygame
 - [wasmcart-rust](https://github.com/wasmcart/wasmcart-rust),
-  [wasmcart-zig](https://github.com/wasmcart/wasmcart-zig),
-  [wasmcart-pygame](https://github.com/wasmcart/wasmcart-pygame),
-  [wasmcart-mruby](https://github.com/wasmcart/wasmcart-mruby)
+  [wasmcart-zig](https://github.com/wasmcart/wasmcart-zig) - no_std and
+  freestanding bindings
+- [wasmcart-mruby](https://github.com/wasmcart/wasmcart-mruby) - Ruby
 - [wasmcart-sdl2](https://github.com/wasmcart/wasmcart-sdl2) - porting toolkit
   for existing C/SDL2 games
 
@@ -162,5 +183,10 @@ clause 4(a) forbids *selling* the work as a Game Engine Product, and the
 definition explicitly covers the runtime. A free wasmcart-defold is fine; a paid
 one, or a paid hosted service producing cart runtimes, is not.
 
-Vendored Defold sources remain under that licence. See `LICENSE.txt` and
-`NOTICE`.
+`LICENSE.txt` and `NOTICE` are upstream's, kept verbatim, and the vendored
+Defold sources remain under that licence.
+
+The files this port adds carry the same Defold License header as the engine
+code they sit beside, because they are backend implementations against Defold's
+own internal interfaces and are not separable from it. There is no second
+licence to reconcile.

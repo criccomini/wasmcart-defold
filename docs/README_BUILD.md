@@ -4,14 +4,14 @@ Defold uses the Python based build system [Waf](https://waf.io/). Most of the in
 
 ## IMPORTANT PREREQUISITE - SETUP
 
-Make sure you have followed the [setup guide](/README_SETUP.md) to install the tools and sdk's you want before attempting to build the engine. If you do not install all of the required software from the setup guide your attempts to build the engine will likely fail.
+Make sure you have followed the [setup guide](/docs/README_SETUP.md) to install the tools and sdk's you want before attempting to build the engine. If you do not install all of the required software from the setup guide your attempts to build the engine will likely fail.
 
 ## Standard workflow
 
 The standard workflow when building the engine is the following:
 
-1. [Setup](/README_SETUP.md) environment
-2. [Install](/README_SETUP.md#required-software---platform-sdks) libraries and SDKs
+1. [Setup](/docs/README_SETUP.md) environment
+2. [Install](/docs/README_SETUP.md#required-software---platform-sdks) libraries and SDKs
 3. Build source dependencies with `build_ext`
 4. Build the engine
 
