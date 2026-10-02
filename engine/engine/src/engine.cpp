@@ -1063,8 +1063,9 @@ namespace dmEngine
             }
         }
 
+        // Browser only: a cart has no navigator and no JS console to write to.
         // Set HTML5 console banner "MadeWithDefold"
-        #if defined(__EMSCRIPTEN__)
+        #if defined(__EMSCRIPTEN__) && !defined(DM_PLATFORM_WASMCART)
         if (1 == dmConfigFile::GetInt(engine->m_Config, "html5.show_console_banner", 1))
         {
             EM_ASM({
@@ -1786,6 +1787,16 @@ namespace dmEngine
         // deadline before the application loop begins.
         engine->m_PreviousFrameTime = dmTime::GetMonotonicTime();
         SetUpdateFrequency(engine, dmConfigFile::GetInt(engine->m_Config, "display.update_frequency", 0));
+
+        // A cart cannot honour a frame cap: the host calls wc_render and owns
+        // the cadence, so UseEngineFramePacing() is false and PaceFrame never
+        // runs. Say so rather than dropping the setting in silence, which reads
+        // as the engine ignoring game.project for no reason.
+        if (dmConfigFile::GetInt(engine->m_Config, "display.update_frequency", 0) != 0 && !UseEngineFramePacing())
+        {
+            dmLogWarning("display.update_frequency is set, but this platform does not pace frames: "
+                         "the host drives the frame rate. The setting is ignored.");
+        }
 
         return true;
 

@@ -2007,13 +2007,13 @@ namespace dmSound
         }
 
         uint16_t active_instance_count;
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(DM_PLATFORM_WASMCART)
         uint32_t playing_instance_count;
 #endif
         {
             DM_MUTEX_OPTIONAL_SCOPED_LOCK(g_SoundSystem->m_Mutex);
             active_instance_count = sound->m_InstancesPool.Size();
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(DM_PLATFORM_WASMCART)
             playing_instance_count = sound->m_PlayingInstanceCount;
 #endif
         }
@@ -2050,7 +2050,7 @@ namespace dmSound
 
         if (active_instance_count == 0)
         {
-            #if defined(__EMSCRIPTEN__)
+            #if defined(__EMSCRIPTEN__) && !defined(DM_PLATFORM_WASMCART)
             if (sound->m_IsDeviceStarted)
             {
                 sound->m_DeviceType->m_DeviceStop(sound->m_Device);
@@ -2074,8 +2074,12 @@ namespace dmSound
             return RESULT_NOTHING_TO_PLAY;
         }
 
-        #if defined(__EMSCRIPTEN__)
+        #if defined(__EMSCRIPTEN__) && !defined(DM_PLATFORM_WASMCART)
         // Paused/stopped HTML5 instances can stay allocated; don't let that idle gap grow the JS queue.
+        // Browser only. A cart writes into a ring buffer that the host drains
+        // every frame, so there is no JS queue to grow, and stopping the device
+        // whenever nothing happens to be playing just adds a stop/start cycle
+        // around every sound effect.
         if (playing_instance_count == 0)
         {
             if (sound->m_IsDeviceStarted)

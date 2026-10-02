@@ -26,9 +26,19 @@ namespace dmEngine
 
     bool UseEngineFramePacing()
     {
-        // UIApplicationMain and the browser schedule frames externally on iOS
-        // and Emscripten, so sleeping inside Step() would block their event loops.
-#if defined(DM_PLATFORM_IOS) || defined(__EMSCRIPTEN__)
+        // The engine paces frames by sleeping inside Step(). That is only
+        // correct where the engine owns the application loop, and it does not
+        // on iOS (UIApplicationMain), in a browser (requestAnimationFrame), or
+        // in a wasmcart cartridge, where the HOST calls wc_render and therefore
+        // decides the cadence. The same cart runs under node, the web, libretro
+        // and native hosts, so it cannot know the display rate and must never
+        // pace itself; sleeping here would stall whichever loop is driving us.
+        //
+        // DM_PLATFORM_WASMCART is named in its own right rather than riding on
+        // __EMSCRIPTEN__: a cart is built with the emscripten toolchain but is
+        // not a browser, and conflating the two leaks browser assumptions into
+        // the cart build.
+#if defined(DM_PLATFORM_IOS) || defined(__EMSCRIPTEN__) || defined(DM_PLATFORM_WASMCART)
         return false;
 #else
         return true;
