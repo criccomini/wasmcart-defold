@@ -46,6 +46,13 @@ extern "C" void dmExportedSymbols(); // Found in "__exported_symbols.cpp"
 
 // The sound device (device_wasmcart.cpp) owns the ring; the shim only
 // publishes its address so the host knows where to drain from.
+namespace dmGraphics
+{
+    extern uint32_t g_WcDrawCalls;
+    extern uint32_t g_WcTriangles;
+    extern uint32_t g_WcFlips;
+}
+
 namespace dmDeviceWasmcart
 {
     extern float    g_AudioRing[];
@@ -396,6 +403,10 @@ void wc_render(void)
         static uint32_t s_GapOver100   = 0;
         static uint32_t s_AudioFrames  = 0;
         static uint32_t s_AudioSamples = 0;
+        static uint32_t s_Draws        = 0;
+        static uint32_t s_Tris         = 0;
+        static uint32_t s_Flips        = 0;
+        static uint32_t s_NoFlipFrames = 0;
 
         const double wall_ms = g_Time.time_ms;
         if (s_WallStartMs < 0.0) s_WallStartMs = wall_ms;
@@ -418,6 +429,13 @@ void wc_render(void)
         s_AudioUsSum   += audio_us;
         s_AudioSamples += audio_written;
         if (audio_written) s_AudioFrames++;
+        s_Draws += dmGraphics::g_WcDrawCalls;
+        s_Tris  += dmGraphics::g_WcTriangles;
+        s_Flips += dmGraphics::g_WcFlips;
+        if (dmGraphics::g_WcFlips == 0) s_NoFlipFrames++;
+        dmGraphics::g_WcDrawCalls = 0;
+        dmGraphics::g_WcTriangles = 0;
+        dmGraphics::g_WcFlips     = 0;
         if (update_us > s_UpdateUsMax) s_UpdateUsMax = update_us;
         if (delta_ms < s_DeltaMsMin)   s_DeltaMsMin  = delta_ms;
         if (delta_ms > s_DeltaMsMax)   s_DeltaMsMax  = delta_ms;
@@ -438,6 +456,7 @@ void wc_render(void)
                 "  update  avg %.3f max %.3f ms | audio avg %.3f ms\n"
                 "  IN CART %.0f ms of %.0f ms (%.0f%%)\n"
                 "  GAP     avg %.1f max %.1f ms, %.0f%% of the second, %u over 33 ms, %u over 100 ms\n"
+                "  render  %u draws, %u tris, %u flips | %u frames rendered NOTHING\n"
                 "  audio   %u/%u frames wrote %u samples (%.2fx realtime)",
                 fps, s_Frames, wall_elapsed, s_SimAccumMs,
                 s_DeltaMsMin, s_SimAccumMs / fn, s_DeltaMsMax,
@@ -445,6 +464,7 @@ void wc_render(void)
                 cart_ms, wall_elapsed, cart_ms * 100.0 / wall_elapsed,
                 gap_ms / fn, s_GapMsMax, gap_ms * 100.0 / wall_elapsed,
                 s_GapOver33, s_GapOver100,
+                s_Draws, s_Tris, s_Flips, s_NoFlipFrames,
                 s_AudioFrames, s_Frames, s_AudioSamples,
                 ((double) s_AudioSamples / (double)(g_HostInfo.audio_sample_rate ? g_HostInfo.audio_sample_rate : 48000))
                     / (wall_elapsed / 1000.0));
@@ -464,6 +484,10 @@ void wc_render(void)
             s_GapOver100   = 0;
             s_AudioFrames  = 0;
             s_AudioSamples = 0;
+            s_Draws        = 0;
+            s_Tris         = 0;
+            s_Flips        = 0;
+            s_NoFlipFrames = 0;
         }
         s_PrevWallMs = wall_ms;
     }

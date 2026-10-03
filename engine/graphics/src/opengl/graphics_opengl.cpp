@@ -237,6 +237,12 @@ DM_PROPERTY_EXTERN(rmtp_DispatchCalls);
 
 namespace dmGraphics
 {
+    // Per-frame render counters, read and reset by the wasmcart shim so a
+    // cart can report what it actually asked the GPU to do each second.
+    uint32_t g_WcDrawCalls = 0;
+    uint32_t g_WcTriangles = 0;
+    uint32_t g_WcFlips     = 0;
+
     using namespace dmVMath;
 
     #define TO_STR_CASE(x) case x: return #x;
@@ -2271,6 +2277,7 @@ static void LogFrameBufferError(GLenum status)
 
     static void OpenGLFlip(HContext _context)
     {
+        g_WcFlips++;
         DM_PROFILE(__FUNCTION__);
         OpenGLContext* context = (OpenGLContext*) _context;
         PostDeleteTextures(context, false);
@@ -3132,6 +3139,7 @@ static void LogFrameBufferError(GLenum status)
 
     static void OpenGLDrawElements(HContext _context, PrimitiveType prim_type, uint32_t first, uint32_t count, Type type, HIndexBuffer buffer, uint32_t instance_count)
     {
+        g_WcDrawCalls++; g_WcTriangles += (count / 3) * (instance_count ? instance_count : 1);
         DM_PROFILE(__FUNCTION__);
         DM_PROPERTY_ADD_U32(rmtp_DrawCalls, 1);
         assert(buffer);
@@ -3158,6 +3166,7 @@ static void LogFrameBufferError(GLenum status)
 
     static void OpenGLDraw(HContext _context, PrimitiveType prim_type, uint32_t first, uint32_t count, uint32_t instance_count)
     {
+        g_WcDrawCalls++; g_WcTriangles += (count / 3) * (instance_count ? instance_count : 1);
         OpenGLContext* context = (OpenGLContext*) _context;
         DM_PROFILE(__FUNCTION__);
         DM_PROPERTY_ADD_U32(rmtp_DrawCalls, 1);
