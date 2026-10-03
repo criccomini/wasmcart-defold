@@ -586,43 +586,31 @@ if(TARGET_PLATFORM_OS STREQUAL "web" AND DEFOLD_WASMCART)
   # DEFOLD_WASMCART configure, so no per-target override is needed here.
   engine_configure_executable(dmengine_wasmcart release engine_release engine_service_null graphics "profile_null;profilerext_null" "ProfilerExt")
 
-  # Stamp the build sha into the binary, resolved ON EVERY BUILD.
-  #
-  # This cannot be an execute_process() here: CMakeLists.txt runs at CONFIGURE
-  # time, so the value would be frozen into build.ninja and reused by every
-  # later incremental build. That is the exact bug this stamp exists to avoid,
-  # and it HAD it: with HEAD at a307b84 the generated build.ninja still carried
-  # WASMCART_BUILD=\"a676ef9\", so a cart printed the previous commit while
-  # running correctly fixed bytes. Telling two builds apart needed a byte-size
-  # comparison, which is not a thing anyone should have to do.
-  #
-  # So the sha goes into a GENERATED HEADER instead, written by a custom
-  # command with no declared output, which makes it run on every build. The
-  # header is only rewritten when the contents actually change (CMake's
-  # copy_if_different via -P), so an unchanged sha does not force a rebuild of
-  # anything that includes it.
-  set(WASMCART_STAMP_DIR "${CMAKE_CURRENT_BINARY_DIR}/wasmcart_stamp")
-  set(WASMCART_STAMP_HEADER "${WASMCART_STAMP_DIR}/wasmcart_build_stamp.h")
-  file(MAKE_DIRECTORY "${WASMCART_STAMP_DIR}")
-  # Written once at configure time as well, so the very first compile of
-  # wasmcart_main.cpp has a header to include even if it somehow races the
-  # custom command.
-  if(NOT EXISTS "${WASMCART_STAMP_HEADER}")
-    file(WRITE "${WASMCART_STAMP_HEADER}" "#define WASMCART_BUILD \"unstamped\"\n")
+  # Stamp the build into the binary. ENGINE_SHA1 above is resolved when CMake
+  # configures and is reused by every later incremental build, so it can name a
+  # commit this binary does not contain. Resolve the sha again here, at build
+  # time, and mark it -dirty when the tree has uncommitted changes, so the
+  # banner the cart prints always describes the bytes that are running.
+  execute_process(
+    COMMAND git -c "safe.directory=${DEFOLD_HOME}" -C "${DEFOLD_HOME}" rev-parse --short HEAD
+    OUTPUT_VARIABLE WASMCART_BUILD_SHA
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+  if(NOT WASMCART_BUILD_SHA)
+    set(WASMCART_BUILD_SHA "nogit")
   endif()
-  add_custom_target(dmengine_wasmcart_stamp
-    COMMAND "${CMAKE_COMMAND}"
-            -D "DEFOLD_HOME=${DEFOLD_HOME}"
-            -D "STAMP_HEADER=${WASMCART_STAMP_HEADER}"
-            -P "${CMAKE_CURRENT_LIST_DIR}/../../share/cmake/wasmcart_build_stamp.cmake"
-    COMMENT "Resolving the wasmcart build sha"
-    VERBATIM)
-  add_dependencies(dmengine_wasmcart dmengine_wasmcart_stamp)
+  execute_process(
+    COMMAND git -c "safe.directory=${DEFOLD_HOME}" -C "${DEFOLD_HOME}" status --porcelain
+    OUTPUT_VARIABLE WASMCART_BUILD_DIRTY
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+  if(WASMCART_BUILD_DIRTY)
+    set(WASMCART_BUILD_SHA "${WASMCART_BUILD_SHA}-dirty")
+  endif()
 
   target_compile_definitions(dmengine_wasmcart PRIVATE DM_PLATFORM_WASMCART
-    WASMCART_HAVE_BUILD_STAMP
+    WASMCART_BUILD="${WASMCART_BUILD_SHA}"
     WASMCART_VERSION="${ENGINE_VERSION}")
-  target_include_directories(dmengine_wasmcart PRIVATE "${WASMCART_STAMP_DIR}")
   target_include_directories(dmengine_wasmcart PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../platform/src")
 
   # Standalone wasm: no JS glue, no entry point, only the cart ABI exported.

@@ -128,14 +128,6 @@ static dmPlatform::WasmcartInputState g_InputState;
 // Fallback frame length, used only for the very first frame and if a host ever
 // reports a non-positive delta. Real pacing comes from wc_time_t.delta_ms,
 // which the host writes before every wc_render.
-// The build sha comes from a header generated on every build (see
-// share/cmake/wasmcart_build_stamp.cmake), not from a compile definition set
-// in CMakeLists.txt: anything set there is resolved at CONFIGURE time and
-// then reused by every incremental build, which is how this banner spent a
-// session naming the previous commit.
-#ifdef WASMCART_HAVE_BUILD_STAMP
-#include "wasmcart_build_stamp.h"
-#endif
 #ifndef WASMCART_BUILD
 #define WASMCART_BUILD "unstamped"
 #endif
@@ -287,8 +279,7 @@ void wc_init(void)
     // Stamp the build into the cart's own log. The engine prints a Defold
     // version too, but that sha is captured when CMake configures and goes
     // stale across incremental builds, so it can name a commit the binary does
-    // not contain. WASMCART_BUILD is re-resolved on every build and carries a
-    // -dirty suffix when the tree has uncommitted changes, which makes it the
+    // not contain. WASMCART_BUILD is injected per compile, which makes it the
     // figure to trust when checking which cart you are actually running.
     {
         char buf[192];
