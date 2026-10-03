@@ -308,6 +308,7 @@ void wc_render(void)
     // a 30 Hz one, because the simulated time per call no longer matches the
     // rate the host actually calls at. wc_time_t is the ABI's clock and the
     // spec requires a cart to take its timing from it.
+    const uint64_t wc_entry_us = dmTime::GetTime();
     uint64_t frame_us = WASMCART_FRAME_US;
     if (g_Time.delta_ms > 0.0)
     {
@@ -419,7 +420,31 @@ void wc_render(void)
         static uint32_t s_Tris         = 0;
         static uint32_t s_Flips        = 0;
         static uint32_t s_NoFlipFrames = 0;
+        static uint32_t s_Hist[8]     = {0,0,0,0,0,0,0,0};
+        static uint64_t s_PrevExitUs  = 0;
+        static uint64_t s_GapRealSum  = 0;
+        static uint64_t s_GapRealMax  = 0;
+        static uint64_t s_InFrameSum  = 0;
         static uint64_t s_PHid=0, s_PExt=0, s_PUpd=0, s_PSnd=0, s_PRen=0, s_PDrw=0, s_PPost=0, s_PFlip=0;
+
+        const uint64_t wc_exit_us = dmTime::GetTime();
+        if (s_PrevExitUs)
+        {
+            const uint64_t g = wc_entry_us - s_PrevExitUs;
+            s_GapRealSum += g;
+            if (g > s_GapRealMax) s_GapRealMax = g;
+            const uint64_t gm = g / 1000;
+            if      (gm <   2) s_Hist[0]++;
+            else if (gm <   8) s_Hist[1]++;
+            else if (gm <  17) s_Hist[2]++;
+            else if (gm <  34) s_Hist[3]++;
+            else if (gm <  70) s_Hist[4]++;
+            else if (gm <  90) s_Hist[5]++;
+            else if (gm < 140) s_Hist[6]++;
+            else               s_Hist[7]++;
+        }
+        s_InFrameSum += wc_exit_us - wc_entry_us;
+        s_PrevExitUs = wc_exit_us;
 
         const double wall_ms = g_Time.time_ms;
         if (s_WallStartMs < 0.0) s_WallStartMs = wall_ms;
@@ -469,13 +494,15 @@ void wc_render(void)
             const double avg_au  = (double) s_AudioUsSum / fn / 1000.0;
             const double cart_ms = (double)(s_UpdateUsSum + s_AudioUsSum) / 1000.0;
             const double gap_ms  = s_GapMsSum;
-            char buf[512];
+            char buf[1024];
             int n = snprintf(buf, sizeof(buf),
                 "wasmcart: %.1f fps | %u frames in %.0f ms real / %.0f ms simulated\n"
                 "  delta   min %.1f avg %.1f max %.1f ms\n"
                 "  update  avg %.3f max %.3f ms | audio avg %.3f ms\n"
                 "  IN CART %.0f ms of %.0f ms (%.0f%%)\n"
                 "  GAP     avg %.1f max %.1f ms, %.0f%% of the second, %u over 33 ms, %u over 100 ms\n"
+                "  REAL    in wc_render %.0f ms | between calls %.0f ms (max %.1f ms)\n"
+                "  GAPHIST <2ms:%u 2-8:%u 8-17:%u 17-34:%u 34-70:%u 70-90:%u 90-140:%u >140:%u\n"
                 "  render  %u draws, %u tris, %u flips | %u frames rendered NOTHING\n"
                 "  phases  hid %.1f ext %.1f update %.1f sound %.1f ms\n"
                 "          render %.1f draw %.1f post %.1f FLIP %.1f ms\n"
@@ -486,6 +513,8 @@ void wc_render(void)
                 cart_ms, wall_elapsed, cart_ms * 100.0 / wall_elapsed,
                 gap_ms / fn, s_GapMsMax, gap_ms * 100.0 / wall_elapsed,
                 s_GapOver33, s_GapOver100,
+                s_InFrameSum / 1000.0, s_GapRealSum / 1000.0, s_GapRealMax / 1000.0,
+                s_Hist[0], s_Hist[1], s_Hist[2], s_Hist[3], s_Hist[4], s_Hist[5], s_Hist[6], s_Hist[7],
                 s_Draws, s_Tris, s_Flips, s_NoFlipFrames,
                 s_PHid/1000.0, s_PExt/1000.0, s_PUpd/1000.0, s_PSnd/1000.0,
                 s_PRen/1000.0, s_PDrw/1000.0, s_PPost/1000.0, s_PFlip/1000.0,
@@ -512,6 +541,8 @@ void wc_render(void)
             s_Tris         = 0;
             s_Flips        = 0;
             s_NoFlipFrames = 0;
+            s_GapRealSum=0; s_GapRealMax=0; s_InFrameSum=0;
+            for (int hi = 0; hi < 8; ++hi) s_Hist[hi] = 0;
             s_PHid=0; s_PExt=0; s_PUpd=0; s_PSnd=0; s_PRen=0; s_PDrw=0; s_PPost=0; s_PFlip=0;
         }
         s_PrevWallMs = wall_ms;
