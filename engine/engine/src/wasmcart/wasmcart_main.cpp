@@ -70,6 +70,8 @@ namespace dmDeviceWasmcart
     extern float    g_AudioRing[];
     extern uint32_t g_AudioWriteCursor;
     uint32_t GetRingFrameCount();
+    void     BeginFrame(uint32_t frames, uint32_t max_credit);
+    void     EndFrame();
     void     SetMixRate(uint32_t rate);
 }
 
@@ -326,6 +328,28 @@ void wc_render(void)
     }
     dmTime::AdvanceVirtualTime(frame_us);
 
+    // Grant the sound device exactly the audio this frame covers, before the
+    // mixer runs inside dmEngineUpdate. The device produces in realtime only
+    // if it produces in proportion to the host delta; left to itself it fills
+    // every free buffer every tick, which makes the host call rate follow the
+    // audio instead of the display (see device_wasmcart.cpp).
+    //
+    // The remainder is carried in a fractional accumulator so integer rounding
+    // does not drift the stream short at high call rates.
+    //
+    // Capped at 1/15 s: one call must never hand a host that paces on its
+    // audio queue more than it targets (80 ms in the reference player), or the
+    // queue is over target the moment wc_render returns and the next delta
+    // becomes the drain wait. 1/15 s still covers a host as slow as 15 Hz.
+    const uint32_t audio_rate = g_HostInfo.audio_sample_rate ? g_HostInfo.audio_sample_rate : 48000;
+    {
+        static uint64_t s_AudioFrac = 0;
+        s_AudioFrac += (uint64_t) audio_rate * frame_us;
+        const uint32_t granted = (uint32_t)(s_AudioFrac / 1000000u);
+        s_AudioFrac %= 1000000u;
+        dmDeviceWasmcart::BeginFrame(granted, audio_rate / 15u);
+    }
+
 
     // One engine tick per host frame. This is the inversion: upstream this
     // call sits inside RunLoop's while loop.
@@ -354,60 +378,13 @@ void wc_render(void)
     uint32_t audio_written = 0;
     {
         const uint64_t audio_t0 = dmTime::GetTime();
-        const uint32_t rate   = g_HostInfo.audio_sample_rate ? g_HostInfo.audio_sample_rate : 48000;
-        const uint32_t ring   = dmDeviceWasmcart::GetRingFrameCount();
-        // Exactly the audio this frame covers, scaled by the delta the host
-        // handed over. A fixed 1/60 s per call looks right only while the host
-        // calls at 60 Hz: call twice as often and the cart emits audio at twice
-        // realtime, the device cannot drain it, and a host that throttles on a
-        // full audio queue then starves the cart of frames. That is not
-        // hypothetical -- it pinned every example at 11.7 fps.
-        //
-        // The device drains in realtime, so the cart must produce in realtime.
-        uint32_t want = (uint32_t)(((uint64_t) rate * frame_us) / 1000000u);
-        // A host stepping far faster than realtime (a headless harness) yields
-        // a sub-sample delta. Emitting nothing is correct there: the ring is
-        // not a heartbeat, it is a stream, and there is no stream to supply.
-        if (want > ring) want = ring;
-
-        // Never hand over more than a frame's worth in one call.
-        //
-        // A host that paces on its audio queue steps the cart while the queue
-        // is below a target and waits when it is above. The reference player
-        // targets 80 ms. If one call delivers more than that, the queue is over
-        // target the moment it returns and the host waits for the device to
-        // drain before calling again -- so the next delta is the drain time,
-        // which makes the next payload even bigger. The rate latches onto whole
-        // audio buffer periods and stays there: measured on macOS, 85.3 ms and
-        // then 128.0 ms, which are exactly two and three 2048-frame buffers at
-        // 48 kHz, for 11.7 and 7.8 fps.
-        //
-        // This caps the SILENCE PADDING only. Defold's mixer has already
-        // written whatever is actually playing, and that is never discarded, so
-        // the cap cannot cause an underrun of real audio -- it only stops the
-        // cart from pre-filling the host's queue further than it asked for.
-        // 1/15 s: enough to cover a host running as slowly as 15 Hz without
-        // underrunning, and still comfortably under the 80 ms the reference
-        // player targets. Capping at a single 60 Hz frame instead starves a
-        // slow host -- measured 0.50x realtime at 30 Hz, which is audible.
-        const uint32_t max_per_call = rate / 15u;
-        if (want > max_per_call) want = max_per_call;
+        const uint32_t ring = dmDeviceWasmcart::GetRingFrameCount();
+        // Pad whatever an idle mixer left unspent, so the ring advances at the
+        // rate audio_cap advertises whether or not a sound is playing.
+        dmDeviceWasmcart::EndFrame();
         static uint32_t s_LastCursor = 0;
-        uint32_t cursor = dmDeviceWasmcart::g_AudioWriteCursor;
-        uint32_t wrote  = (cursor - s_LastCursor) % ring;
-        if (wrote < want)
-        {
-            uint32_t pad = want - wrote;
-            for (uint32_t i = 0; i < pad; ++i)
-            {
-                const uint32_t idx = ((cursor + i) % ring) * 2;
-                dmDeviceWasmcart::g_AudioRing[idx]     = 0.0f;
-                dmDeviceWasmcart::g_AudioRing[idx + 1] = 0.0f;
-            }
-            cursor = (cursor + pad) % ring;
-            dmDeviceWasmcart::g_AudioWriteCursor = cursor;
-        }
-        audio_written = (uint32_t)((cursor - s_LastCursor) % ring);
+        const uint32_t cursor = dmDeviceWasmcart::g_AudioWriteCursor;
+        audio_written = (uint32_t)((cursor + ring - s_LastCursor) % ring);
         s_LastCursor = cursor;
         audio_us = dmTime::GetTime() - audio_t0;
     }

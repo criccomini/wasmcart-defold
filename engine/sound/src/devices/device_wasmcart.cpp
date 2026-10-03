@@ -46,6 +46,24 @@ namespace dmDeviceWasmcart
     // Set by the shim from wc_host_info_t; 0 until then.
     static uint32_t g_MixRate = 0;
 
+    // Frames the host is owed for the time it has handed over, and not yet
+    // written. The shim adds delta * rate before each engine tick; the mixer
+    // spends it and the shim pads whatever an idle mixer left behind.
+    //
+    // Without a budget the mixer fills every free buffer on every tick: four
+    // buffers of 1024 frames at 48 kHz, 85.3 ms of audio per wc_render however
+    // short the frame was. A host pacing on its audio queue then calls once per
+    // 85.3 ms, which is the 11.7 fps every example locked to while a sound was
+    // playing.
+    static uint32_t g_FrameCredit = 0;
+    static bool     g_MixerPolled = false;
+
+    // The mixer skips a buffer shorter than its history window WITHOUT counting
+    // it against free_slots (sound.cpp: `if (frame_count < SOUND_MAX_HISTORY)
+    // continue;`), so offering 1 to 3 frames spins that loop forever. Below
+    // this, report nothing available.
+    static const uint32_t MIN_MIX_FRAMES = 4;
+
     struct WasmcartDevice
     {
         // m_FreeBufferSlots is a count of BUFFERS, not frames: sound.cpp
@@ -65,6 +83,46 @@ namespace dmDeviceWasmcart
     uint32_t GetRingFrameCount()
     {
         return RING_FRAMES;
+    }
+
+    static void WriteSilence(uint32_t frames)
+    {
+        uint32_t cursor = g_AudioWriteCursor;
+        for (uint32_t i = 0; i < frames; ++i)
+        {
+            const uint32_t idx = ((cursor + i) % RING_FRAMES) * 2;
+            g_AudioRing[idx]     = 0.0f;
+            g_AudioRing[idx + 1] = 0.0f;
+        }
+        g_AudioWriteCursor = (cursor + frames) % RING_FRAMES;
+    }
+
+    // Called by the shim before the engine tick: the host has advanced the
+    // clock by `frames` worth of audio. max_credit bounds what one tick may
+    // write, so a host stall is not repaid as one burst that overfills the
+    // host queue.
+    void BeginFrame(uint32_t frames, uint32_t max_credit)
+    {
+        g_FrameCredit += frames;
+        if (g_FrameCredit > max_credit)
+        {
+            g_FrameCredit = max_credit;
+        }
+        g_MixerPolled = false;
+    }
+
+    // Called by the shim after the engine tick. Defold only runs its mixer
+    // while something is playing (DEF-3130), so between sounds nothing spends
+    // the credit; write it as silence so the stream keeps realtime pace. While
+    // the mixer is running, a leftover of a few frames carries to the next tick
+    // instead -- padding there would put zeros in the middle of a sound.
+    void EndFrame()
+    {
+        if (!g_MixerPolled && g_FrameCredit)
+        {
+            WriteSilence(g_FrameCredit);
+            g_FrameCredit = 0;
+        }
     }
 
     dmSound::Result DeviceWasmcartOpen(const dmSound::OpenDeviceParams* params, dmSound::HDevice* device)
@@ -121,6 +179,7 @@ namespace dmDeviceWasmcart
         // Publish only after the samples are in place: the host may read the
         // cursor at any point between frames.
         g_AudioWriteCursor = (cursor + sample_count) % RING_FRAMES;
+        g_FrameCredit = sample_count < g_FrameCredit ? g_FrameCredit - sample_count : 0;
 
         if (dev->m_QueuedBuffers < dev->m_BufferCount)
         {
@@ -134,11 +193,22 @@ namespace dmDeviceWasmcart
         assert(device);
         WasmcartDevice* dev = (WasmcartDevice*) device;
 
-        // The host drains everything up to our write cursor once per frame,
-        // so by the time we are asked again all previously queued buffers
-        // have been taken. Retire them and report the whole pool free.
+        // The host drains everything up to our write cursor once per frame, so
+        // by the time we are asked again all previously queued buffers have
+        // been taken. Retire them. Slots are only offered while there is credit
+        // to spend; DeviceWasmcartGetAvailableFrames sizes each one.
+        g_MixerPolled = true;
         dev->m_QueuedBuffers = 0;
-        return dev->m_BufferCount;
+        return g_FrameCredit >= MIN_MIX_FRAMES ? dev->m_BufferCount : 0;
+    }
+
+    // Asked before each buffer is mixed. Returning the credit (the mixer clamps
+    // it to its own buffer size) makes one tick produce exactly the audio the
+    // host delta covers; 0 ends the tick mixing loop.
+    uint32_t DeviceWasmcartGetAvailableFrames(dmSound::HDevice device)
+    {
+        assert(device);
+        return g_FrameCredit >= MIN_MIX_FRAMES ? g_FrameCredit : 0;
     }
 
     void DeviceWasmcartDeviceInfo(dmSound::HDevice device, dmSound::DeviceInfo* info)
@@ -167,6 +237,6 @@ namespace dmDeviceWasmcart
     }
 
     DM_DECLARE_SOUND_DEVICE(DefaultSoundDevice, "default", DeviceWasmcartOpen, DeviceWasmcartClose,
-                            DeviceWasmcartQueue, DeviceWasmcartFreeBufferSlots, 0,
+                            DeviceWasmcartQueue, DeviceWasmcartFreeBufferSlots, DeviceWasmcartGetAvailableFrames,
                             DeviceWasmcartDeviceInfo, DeviceWasmcartStart, DeviceWasmcartStop);
 }
