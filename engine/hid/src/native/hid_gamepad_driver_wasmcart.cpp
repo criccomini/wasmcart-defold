@@ -47,9 +47,23 @@
 namespace dmHID
 {
     // The host reports triggers as 0..255 and sticks as full-range int16.
-    // Defold wants floats: triggers 0..1, axes -1..1.
+    // Defold wants every mapped axis in -1..1, TRIGGERS INCLUDED: the
+    // automatic gamepad config registers LTRIGGER/RTRIGGER with scale set
+    // (input.cpp SetAutomaticGamepadAxis), and a scaled axis is read as
+    // (v + 1) * 0.5. So a trigger has to REST AT -1, not at 0.
+    //
+    // Handing it 0..1 instead put a released trigger at 0, which became 0.5
+    // after that transform -- over the threshold, so both triggers read as
+    // HELD from the first frame with nothing touched. planetoid binds
+    // GAMEPAD_LTRIGGER to "left" and GAMEPAD_RTRIGGER to "right", so both
+    // fired every frame and cancelled out, and the arrow keys could only
+    // raise an already-0.5 action to 1.0 (an action takes the max), so the
+    // ship never moved. It looked like dead input, not a stuck axis.
+    //
+    // 2/255 then -1 maps rest 0 to -1 and full 255 to +1, which is what
+    // gamepad_darwin.mm does for the same axes (value * 2.0f - 1.0f).
     static const float WASMCART_AXIS_SCALE    = 1.0f / 32767.0f;
-    static const float WASMCART_TRIGGER_SCALE = 1.0f / 255.0f;
+    static const float WASMCART_TRIGGER_SCALE = 2.0f / 255.0f;
 
     // A stick pushed past this counts as a d-pad press for the hat. Without a
     // hat the automatic config's gamepad_lpad_* bindings never fire, and a
@@ -186,8 +200,8 @@ namespace dmHID
         packet.m_Axis[GAMEPAD_MAPPED_AXIS_LEFT_Y]  = pad.m_LeftY  * WASMCART_AXIS_SCALE;
         packet.m_Axis[GAMEPAD_MAPPED_AXIS_RIGHT_X] = pad.m_RightX * WASMCART_AXIS_SCALE;
         packet.m_Axis[GAMEPAD_MAPPED_AXIS_RIGHT_Y] = pad.m_RightY * WASMCART_AXIS_SCALE;
-        packet.m_Axis[GAMEPAD_MAPPED_AXIS_LEFT_TRIGGER]  = pad.m_LeftTrigger  * WASMCART_TRIGGER_SCALE;
-        packet.m_Axis[GAMEPAD_MAPPED_AXIS_RIGHT_TRIGGER] = pad.m_RightTrigger * WASMCART_TRIGGER_SCALE;
+        packet.m_Axis[GAMEPAD_MAPPED_AXIS_LEFT_TRIGGER]  = pad.m_LeftTrigger  * WASMCART_TRIGGER_SCALE - 1.0f;
+        packet.m_Axis[GAMEPAD_MAPPED_AXIS_RIGHT_TRIGGER] = pad.m_RightTrigger * WASMCART_TRIGGER_SCALE - 1.0f;
 
         const uint16_t b = pad.m_Buttons;
 
