@@ -120,6 +120,18 @@ DM_PROPERTY_U32(rmtp_LuaRefs, 0, PROFILE_PROPERTY_FRAME_RESET, "# Lua references
 
 namespace dmEngine
 {
+    // Per-frame phase timings in microseconds, read and reset by the
+    // wasmcart shim. StepFrame is one opaque block from outside, and a
+    // frame that takes 85 ms needs to name WHICH phase took it.
+    uint64_t g_WcPhaseHid    = 0;
+    uint64_t g_WcPhaseExt    = 0;
+    uint64_t g_WcPhaseUpdate = 0;
+    uint64_t g_WcPhaseSound  = 0;
+    uint64_t g_WcPhaseRender = 0;
+    uint64_t g_WcPhaseDraw   = 0;
+    uint64_t g_WcPhasePost   = 0;
+    uint64_t g_WcPhaseFlip   = 0;
+
 #if !(defined(DM_PLATFORM_VENDOR))
 #if defined(_WIN32)
     static bool g_TimerResolutionEnabled = false;
@@ -1666,7 +1678,9 @@ namespace dmEngine
                                         (float)((engine->m_ClearColor>>16)&0xFF),
                                         (float)((engine->m_ClearColor>>24)&0xFF),
                                         1.0f, 0);
-            dmGraphics::Flip(engine->m_GraphicsContext);
+            { const uint64_t _t=dmTime::GetTime();
+              dmGraphics::Flip(engine->m_GraphicsContext);
+              g_WcPhaseFlip += dmTime::GetTime()-_t; }
         }
 
         if (engine->m_RenderScriptPrototype) {
@@ -2019,7 +2033,9 @@ bail:
                 bool has_input = false;
                 {
                     DM_PROFILE("Hid");
-                    has_input = dmHID::Update(engine->m_HidContext);
+                    { const uint64_t _t=dmTime::GetTime();
+                      has_input = dmHID::Update(engine->m_HidContext);
+                      g_WcPhaseHid += dmTime::GetTime()-_t; }
                 }
 
                 // Check if we should skip this frame
@@ -2067,7 +2083,9 @@ bail:
                     dmGameSystem::UpdateScriptLibs(script_lib_context);
                     dmScript::Update(engine->m_ScriptContext);
                     extension_params.SetLuaContext(engine->m_ScriptContext);
-                    dmExtension::Update(extension_params);
+                    { const uint64_t _t=dmTime::GetTime();
+                      dmExtension::Update(extension_params);
+                      g_WcPhaseExt += dmTime::GetTime()-_t; }
                 }
 
                 bool esc_pressed = false;
@@ -2111,9 +2129,13 @@ bail:
                 update_context.m_DT = dt;
                 update_context.m_FixedUpdateFrequency = engine->m_FixedUpdateFrequency;
                 update_context.m_AccumFrameTime = engine->m_AccumFrameTime;
-                dmGameObject::Update(engine->m_MainCollection, &update_context);
+                { const uint64_t _t=dmTime::GetTime();
+                  dmGameObject::Update(engine->m_MainCollection, &update_context);
+                  g_WcPhaseUpdate += dmTime::GetTime()-_t; }
 
-                dmSound::Update();
+                { const uint64_t _t=dmTime::GetTime();
+                  dmSound::Update();
+                  g_WcPhaseSound += dmTime::GetTime()-_t; }
 
                 // Don't render while iconified
                 if (!dmGraphics::GetWindowStateParam(engine->m_GraphicsContext, WINDOW_STATE_ICONIFIED) && do_render)
@@ -2130,7 +2152,9 @@ bail:
 
                     // Make the render list that will be used later.
                     dmRender::RenderListBegin(engine->m_RenderContext);
-                    dmGameObject::Render(engine->m_MainCollection);
+                    { const uint64_t _t=dmTime::GetTime();
+                      dmGameObject::Render(engine->m_MainCollection);
+                      g_WcPhaseRender += dmTime::GetTime()-_t; }
 
                     // Make sure we dispatch messages to the render script
                     // since it could have some "draw_text" messages waiting.
@@ -2156,11 +2180,15 @@ bail:
                                             (float)((engine->m_ClearColor>>16)&0xFF),
                                             (float)((engine->m_ClearColor>>24)&0xFF),
                                             1.0f, 0);
-                        dmRender::DrawRenderList(engine->m_RenderContext, 0x0, 0x0, 0x0, dmRender::SORT_BACK_TO_FRONT);
+                        { const uint64_t _t=dmTime::GetTime();
+                          dmRender::DrawRenderList(engine->m_RenderContext, 0x0, 0x0, 0x0, dmRender::SORT_BACK_TO_FRONT);
+                          g_WcPhaseDraw += dmTime::GetTime()-_t; }
                     }
                 }
 
-                dmGameObject::PostUpdate(engine->m_MainCollection);
+                { const uint64_t _t=dmTime::GetTime();
+                  dmGameObject::PostUpdate(engine->m_MainCollection);
+                  g_WcPhasePost += dmTime::GetTime()-_t; }
                 dmGameObject::PostUpdate(engine->m_Register);
 
                 if (do_render)

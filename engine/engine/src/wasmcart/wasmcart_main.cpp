@@ -46,6 +46,18 @@ extern "C" void dmExportedSymbols(); // Found in "__exported_symbols.cpp"
 
 // The sound device (device_wasmcart.cpp) owns the ring; the shim only
 // publishes its address so the host knows where to drain from.
+namespace dmEngine
+{
+    extern uint64_t g_WcPhaseHid;
+    extern uint64_t g_WcPhaseExt;
+    extern uint64_t g_WcPhaseUpdate;
+    extern uint64_t g_WcPhaseSound;
+    extern uint64_t g_WcPhaseRender;
+    extern uint64_t g_WcPhaseDraw;
+    extern uint64_t g_WcPhasePost;
+    extern uint64_t g_WcPhaseFlip;
+}
+
 namespace dmGraphics
 {
     extern uint32_t g_WcDrawCalls;
@@ -318,9 +330,9 @@ void wc_render(void)
     // call sits inside RunLoop's while loop.
     // Time the engine pass itself, so the report can say whether a slow frame
     // is the cart working hard or the host simply not calling.
-    const uint64_t update_t0 = dmTime::GetMonotonicTime();
+    const uint64_t update_t0 = dmTime::GetTime();
     dmEngine::UpdateResult result = (dmEngine::UpdateResult) dmEngineUpdate(g_Engine);
-    const uint64_t update_us = dmTime::GetMonotonicTime() - update_t0;
+    const uint64_t update_us = dmTime::GetTime() - update_t0;
 
 
 
@@ -340,7 +352,7 @@ void wc_render(void)
     uint64_t audio_us = 0;
     uint32_t audio_written = 0;
     {
-        const uint64_t audio_t0 = dmTime::GetMonotonicTime();
+        const uint64_t audio_t0 = dmTime::GetTime();
         const uint32_t rate   = g_HostInfo.audio_sample_rate ? g_HostInfo.audio_sample_rate : 48000;
         const uint32_t ring   = dmDeviceWasmcart::GetRingFrameCount();
         // Exactly the audio this frame covers, scaled by the delta the host
@@ -373,7 +385,7 @@ void wc_render(void)
         }
         audio_written = (uint32_t)((cursor - s_LastCursor) % ring);
         s_LastCursor = cursor;
-        audio_us = dmTime::GetMonotonicTime() - audio_t0;
+        audio_us = dmTime::GetTime() - audio_t0;
     }
 
     // Per-second report of everything the cart can see about its own frame.
@@ -407,6 +419,7 @@ void wc_render(void)
         static uint32_t s_Tris         = 0;
         static uint32_t s_Flips        = 0;
         static uint32_t s_NoFlipFrames = 0;
+        static uint64_t s_PHid=0, s_PExt=0, s_PUpd=0, s_PSnd=0, s_PRen=0, s_PDrw=0, s_PPost=0, s_PFlip=0;
 
         const double wall_ms = g_Time.time_ms;
         if (s_WallStartMs < 0.0) s_WallStartMs = wall_ms;
@@ -436,6 +449,13 @@ void wc_render(void)
         dmGraphics::g_WcDrawCalls = 0;
         dmGraphics::g_WcTriangles = 0;
         dmGraphics::g_WcFlips     = 0;
+        s_PHid += dmEngine::g_WcPhaseHid;   s_PExt  += dmEngine::g_WcPhaseExt;
+        s_PUpd += dmEngine::g_WcPhaseUpdate;s_PSnd  += dmEngine::g_WcPhaseSound;
+        s_PRen += dmEngine::g_WcPhaseRender;s_PDrw  += dmEngine::g_WcPhaseDraw;
+        s_PPost+= dmEngine::g_WcPhasePost;  s_PFlip += dmEngine::g_WcPhaseFlip;
+        dmEngine::g_WcPhaseHid=0; dmEngine::g_WcPhaseExt=0; dmEngine::g_WcPhaseUpdate=0;
+        dmEngine::g_WcPhaseSound=0; dmEngine::g_WcPhaseRender=0; dmEngine::g_WcPhaseDraw=0;
+        dmEngine::g_WcPhasePost=0; dmEngine::g_WcPhaseFlip=0;
         if (update_us > s_UpdateUsMax) s_UpdateUsMax = update_us;
         if (delta_ms < s_DeltaMsMin)   s_DeltaMsMin  = delta_ms;
         if (delta_ms > s_DeltaMsMax)   s_DeltaMsMax  = delta_ms;
@@ -457,6 +477,8 @@ void wc_render(void)
                 "  IN CART %.0f ms of %.0f ms (%.0f%%)\n"
                 "  GAP     avg %.1f max %.1f ms, %.0f%% of the second, %u over 33 ms, %u over 100 ms\n"
                 "  render  %u draws, %u tris, %u flips | %u frames rendered NOTHING\n"
+                "  phases  hid %.1f ext %.1f update %.1f sound %.1f ms\n"
+                "          render %.1f draw %.1f post %.1f FLIP %.1f ms\n"
                 "  audio   %u/%u frames wrote %u samples (%.2fx realtime)",
                 fps, s_Frames, wall_elapsed, s_SimAccumMs,
                 s_DeltaMsMin, s_SimAccumMs / fn, s_DeltaMsMax,
@@ -465,6 +487,8 @@ void wc_render(void)
                 gap_ms / fn, s_GapMsMax, gap_ms * 100.0 / wall_elapsed,
                 s_GapOver33, s_GapOver100,
                 s_Draws, s_Tris, s_Flips, s_NoFlipFrames,
+                s_PHid/1000.0, s_PExt/1000.0, s_PUpd/1000.0, s_PSnd/1000.0,
+                s_PRen/1000.0, s_PDrw/1000.0, s_PPost/1000.0, s_PFlip/1000.0,
                 s_AudioFrames, s_Frames, s_AudioSamples,
                 ((double) s_AudioSamples / (double)(g_HostInfo.audio_sample_rate ? g_HostInfo.audio_sample_rate : 48000))
                     / (wall_elapsed / 1000.0));
@@ -488,6 +512,7 @@ void wc_render(void)
             s_Tris         = 0;
             s_Flips        = 0;
             s_NoFlipFrames = 0;
+            s_PHid=0; s_PExt=0; s_PUpd=0; s_PSnd=0; s_PRen=0; s_PDrw=0; s_PPost=0; s_PFlip=0;
         }
         s_PrevWallMs = wall_ms;
     }
