@@ -379,14 +379,16 @@ namespace dmPlatform
             return 0;
         }
 
-        // Sticks are int16; triggers are uint8. Both normalise to -1..1 / 0..1.
+        // Every axis is int16 as of ABI v4, so one divisor for all six:
+        // sticks normalise to -1..1 and triggers to 0..1 because they are
+        // never negative. The triggers divided by 255 while they were a byte.
         const float axes[6] = {
             pad->m_LeftX  / 32767.0f,
             pad->m_LeftY  / 32767.0f,
             pad->m_RightX / 32767.0f,
             pad->m_RightY / 32767.0f,
-            pad->m_LeftTrigger  / 255.0f,
-            pad->m_RightTrigger / 255.0f,
+            pad->m_LeftTrigger  / 32767.0f,
+            pad->m_RightTrigger / 32767.0f,
         };
 
         uint32_t count = values_capacity < 6 ? values_capacity : 6;

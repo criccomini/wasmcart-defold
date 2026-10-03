@@ -17,13 +17,17 @@
 
 #include <stdint.h>
 
-// Mirrors of the wasmcart ABI v3 input blocks.
+// Mirrors of the wasmcart ABI v4 input blocks.
 //
 // These are layout-compatible with wc_pad_t / wc_pointer_t / wc_wheel_t in
 // wasmcart.h, but declared separately so the engine's platform layer does
 // not have to include the cart header (which pulls in wasm import
 // attributes that only make sense in the cart shim translation unit).
-// platform_wasmcart_cart.cpp static_asserts the two against each other.
+// The sizes are asserted below rather than against the cart header: that
+// cross-check was described in a comment here and never actually existed, so
+// nothing stopped these mirrors from drifting when the ABI moved to v4 -- and
+// they did. A size assert cannot catch a reordering, but it catches every
+// change that alters the footprint, which is what v4 was.
 
 // Button bits in WasmcartPad::m_Buttons, mirroring WC_BTN_* in wasmcart.h.
 // Named separately for the same reason the structs are: the platform layer
@@ -42,26 +46,40 @@
 #define WASMCART_BTN_RIGHT  (1 << 11)
 #define WASMCART_BTN_L3     (1 << 12)
 #define WASMCART_BTN_R3     (1 << 13)
+// ABI v4 additions, completing parity with SDL2's controller button set.
+#define WASMCART_BTN_GUIDE    (1 << 14)
+#define WASMCART_BTN_MISC1    (1 << 15)
+#define WASMCART_BTN_PADDLE1  (1 << 16)
+#define WASMCART_BTN_PADDLE2  (1 << 17)
+#define WASMCART_BTN_PADDLE3  (1 << 18)
+#define WASMCART_BTN_PADDLE4  (1 << 19)
+#define WASMCART_BTN_TOUCHPAD (1 << 20)
+
+// Full travel on a trigger (ABI v4). Matches SDL2 and libretro.
+#define WASMCART_TRIGGER_MAX  32767
 
 #define WASMCART_POINTER_COUNT    10
 #define WASMCART_PAD_COUNT        4
-#define WASMCART_PAD_BUTTON_COUNT 14
+#define WASMCART_PAD_BUTTON_COUNT 21
 #define WASMCART_KEY_COUNT        256
 
 namespace dmPlatform
 {
+    // 20 bytes (ABI v4). Every analog axis is int16: sticks -32768..32767,
+    // triggers 0..32767, which is what SDL2 and libretro report natively.
     struct WasmcartPad
     {
-        uint16_t m_Buttons;
+        uint32_t m_Buttons;        // bits 21-31 reserved
         int16_t  m_LeftX;
         int16_t  m_LeftY;
         int16_t  m_RightX;
         int16_t  m_RightY;
-        uint8_t  m_LeftTrigger;
-        uint8_t  m_RightTrigger;
+        int16_t  m_LeftTrigger;    // 0..32767, never negative
+        int16_t  m_RightTrigger;   // 0..32767, never negative
         uint8_t  m_Connected;
         uint8_t  m_Pad[3];
     };
+    static_assert(sizeof(WasmcartPad) == 20, "WasmcartPad must match wc_pad_t (ABI v4)");
 
     struct WasmcartPointer
     {

@@ -38,7 +38,7 @@ extern "C" void dmExportedSymbols(); // Found in "__exported_symbols.cpp"
 // the cart header itself is not included in the engine's platform layer).
 // ---------------------------------------------------------------------------
 
-#define WC_ABI_VERSION     3
+#define WC_ABI_VERSION     4
 #define WC_GPU_API_GLES3   1
 #define WC_FLAG_AUDIO_F32  (1 << 0)
 #define WC_FLAG_POINTER    (1 << 3)

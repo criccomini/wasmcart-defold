@@ -46,7 +46,8 @@
 
 namespace dmHID
 {
-    // The host reports triggers as 0..255 and sticks as full-range int16.
+    // The host reports every analog axis as int16 (ABI v4): sticks are
+    // full-range and triggers are 0..32767, never negative.
     // Defold wants every mapped axis in -1..1, TRIGGERS INCLUDED: the
     // automatic gamepad config registers LTRIGGER/RTRIGGER with scale set
     // (input.cpp SetAutomaticGamepadAxis), and a scaled axis is read as
@@ -60,10 +61,10 @@ namespace dmHID
     // raise an already-0.5 action to 1.0 (an action takes the max), so the
     // ship never moved. It looked like dead input, not a stuck axis.
     //
-    // 2/255 then -1 maps rest 0 to -1 and full 255 to +1, which is what
+    // 2/32767 then -1 maps rest 0 to -1 and full 32767 to +1, which is what
     // gamepad_darwin.mm does for the same axes (value * 2.0f - 1.0f).
     static const float WASMCART_AXIS_SCALE    = 1.0f / 32767.0f;
-    static const float WASMCART_TRIGGER_SCALE = 2.0f / 255.0f;
+    static const float WASMCART_TRIGGER_SCALE = 2.0f / 32767.0f;
 
     // A stick pushed past this counts as a d-pad press for the hat. Without a
     // hat the automatic config's gamepad_lpad_* bindings never fire, and a
@@ -203,7 +204,11 @@ namespace dmHID
         packet.m_Axis[GAMEPAD_MAPPED_AXIS_LEFT_TRIGGER]  = pad.m_LeftTrigger  * WASMCART_TRIGGER_SCALE - 1.0f;
         packet.m_Axis[GAMEPAD_MAPPED_AXIS_RIGHT_TRIGGER] = pad.m_RightTrigger * WASMCART_TRIGGER_SCALE - 1.0f;
 
-        const uint16_t b = pad.m_Buttons;
+        // uint32, not uint16: ABI v4 widened m_Buttons and put GUIDE at bit
+        // 14 through TOUCHPAD at bit 20. A uint16 local truncates every bit
+        // above 15, which would drop MISC1, the paddles and the touchpad
+        // silently -- they would simply never fire.
+        const uint32_t b = pad.m_Buttons;
 
         SetButton(&packet, GAMEPAD_MAPPED_BUTTON_A,              (b & WASMCART_BTN_A) != 0);
         SetButton(&packet, GAMEPAD_MAPPED_BUTTON_B,              (b & WASMCART_BTN_B) != 0);
@@ -215,10 +220,16 @@ namespace dmHID
         SetButton(&packet, GAMEPAD_MAPPED_BUTTON_BACK,           (b & WASMCART_BTN_SELECT) != 0);
         SetButton(&packet, GAMEPAD_MAPPED_BUTTON_LEFT_THUMB,     (b & WASMCART_BTN_L3) != 0);
         SetButton(&packet, GAMEPAD_MAPPED_BUTTON_RIGHT_THUMB,    (b & WASMCART_BTN_R3) != 0);
-        // A cart pad has no guide/capture button; leave them clear rather
-        // than aliasing them onto start, which would fire two actions at once.
-        SetButton(&packet, GAMEPAD_MAPPED_BUTTON_GUIDE,   false);
-        SetButton(&packet, GAMEPAD_MAPPED_BUTTON_CAPTURE, false);
+        // Real as of ABI v4, which added both. They were hardcoded false
+        // because the pad had no bits for them, not because Defold lacks the
+        // mapped buttons. MISC1 is the share/capture/microphone key, whose
+        // closest Defold equivalent is CAPTURE.
+        SetButton(&packet, GAMEPAD_MAPPED_BUTTON_GUIDE,   (b & WASMCART_BTN_GUIDE) != 0);
+        SetButton(&packet, GAMEPAD_MAPPED_BUTTON_CAPTURE, (b & WASMCART_BTN_MISC1) != 0);
+
+        // PADDLE1-4 and TOUCHPAD have no GAMEPAD_MAPPED_BUTTON_* equivalent,
+        // so they stay unmapped rather than being aliased onto something
+        // else. A game wanting them reads the pad through its own binding.
 
         // The d-pad is a HAT in the automatic config, and the mask bits are
         // the classic clockwise-from-up order (1 up, 2 right, 4 down, 8 left).
