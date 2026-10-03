@@ -369,6 +369,29 @@ void wc_render(void)
         // a sub-sample delta. Emitting nothing is correct there: the ring is
         // not a heartbeat, it is a stream, and there is no stream to supply.
         if (want > ring) want = ring;
+
+        // Never hand over more than a frame's worth in one call.
+        //
+        // A host that paces on its audio queue steps the cart while the queue
+        // is below a target and waits when it is above. The reference player
+        // targets 80 ms. If one call delivers more than that, the queue is over
+        // target the moment it returns and the host waits for the device to
+        // drain before calling again -- so the next delta is the drain time,
+        // which makes the next payload even bigger. The rate latches onto whole
+        // audio buffer periods and stays there: measured on macOS, 85.3 ms and
+        // then 128.0 ms, which are exactly two and three 2048-frame buffers at
+        // 48 kHz, for 11.7 and 7.8 fps.
+        //
+        // This caps the SILENCE PADDING only. Defold's mixer has already
+        // written whatever is actually playing, and that is never discarded, so
+        // the cap cannot cause an underrun of real audio -- it only stops the
+        // cart from pre-filling the host's queue further than it asked for.
+        // 1/15 s: enough to cover a host running as slowly as 15 Hz without
+        // underrunning, and still comfortably under the 80 ms the reference
+        // player targets. Capping at a single 60 Hz frame instead starves a
+        // slow host -- measured 0.50x realtime at 30 Hz, which is audible.
+        const uint32_t max_per_call = rate / 15u;
+        if (want > max_per_call) want = max_per_call;
         static uint32_t s_LastCursor = 0;
         uint32_t cursor = dmDeviceWasmcart::g_AudioWriteCursor;
         uint32_t wrote  = (cursor - s_LastCursor) % ring;
