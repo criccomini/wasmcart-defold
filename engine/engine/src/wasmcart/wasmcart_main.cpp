@@ -379,8 +379,6 @@ void wc_render(void)
     {
         const uint64_t audio_t0 = dmTime::GetTime();
         const uint32_t ring = dmDeviceWasmcart::GetRingFrameCount();
-        // Pad whatever an idle mixer left unspent, so the ring advances at the
-        // rate audio_cap advertises whether or not a sound is playing.
         dmDeviceWasmcart::EndFrame();
         static uint32_t s_LastCursor = 0;
         const uint32_t cursor = dmDeviceWasmcart::g_AudioWriteCursor;
