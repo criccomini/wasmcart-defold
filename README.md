@@ -116,6 +116,56 @@ migration script for pre-1.13 projects live in
 [wasmcart-defold-examples](https://github.com/wasmcart/wasmcart-defold-examples),
 which carries twelve carts including five complete games.
 
+## WebGPU carts
+
+The same build also produces a WebGPU cart (`wc_info_t.gpu_api = 2`) from
+Defold's own WebGPU adapter, when it is pointed at the emdawnwebgpu release the
+host's WebGPU glue was generated from. The cart carries the port's C++ half and
+the host supplies the JavaScript half, so the two must be the same release
+(currently `v20261002.154047`). A cart built with Emscripten's old
+`-sUSE_WEBGPU` bindings is not compatible.
+
+```bash
+export DEFOLD_EMDAWNWEBGPU_PORT=/path/to/emdawnwebgpu_pkg/emdawnwebgpu.port.py
+./scripts/build.py --platform=wasm-web --skip-tests build_engine -- \
+    --skip-build-tests --with-wasmcart
+# -> tmp/dynamo_home/bin/wasm-web/dmengine_wasmcart.wasm         (GL)
+# -> tmp/dynamo_home/bin/wasm-web/dmengine_wasmcart_webgpu.wasm  (WebGPU)
+```
+
+Without `DEFOLD_EMDAWNWEBGPU_PORT` only the GL cart is built. The value is
+cached by CMake, so a later build without the variable keeps using it.
+
+Content needs WGSL shaders as well as GLSL ES. Add one flag to the bob command
+above; the resulting archive serves both carts:
+
+```bash
+java -jar bob.jar --root <game> --platform wasm-web --archive \
+    --use-uncompressed-lua-source --debug-output-wgsl true build
+```
+
+Pack it exactly like the GL cart, with `dmengine_wasmcart_webgpu.wasm` as the
+`--wasm`.
+
+How the WebGPU cart differs from Defold's browser WebGPU build:
+
+- **No Asyncify, no adapter or device request.** The host owns the device and
+  `emscripten_webgpu_get_device()` returns it synchronously, so the adapter
+  skips `wgpuInstanceRequestAdapter`/`wgpuInstanceWaitAny`. There is no
+  `WGPUAdapter`; feature queries go to the device.
+- **No present.** The cart renders into the `#canvas` surface and the host
+  presents after `wc_render`.
+- **Validation errors are logged by the cart.** An imported device cannot take
+  an uncaptured-error callback, so the adapter keeps a validation error scope
+  open across each frame and pops it after the frame's submit. Errors arrive
+  between frames and print as `WebGPU error (2): ...`.
+- **Only the WebGPU adapter is linked.** The cart imports no GL functions.
+
+The device is whatever the host created. Defold's sprite, label, GUI, particle
+and physics content renders without validation errors on a
+compatibility-feature-level device as well as a core one; texture arrays, cube
+maps, compute and MSAA have not been exercised on either.
+
 ## How this repo is organised
 
 The full Defold tree is **vendored** at upstream commit `540123b`, not forked.
