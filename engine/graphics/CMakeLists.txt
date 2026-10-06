@@ -268,6 +268,35 @@ if(GRAPHICS_BUILD_WEBGPU)
     list(APPEND GRAPHICS_INSTALL_TARGETS ${_webgpu_target})
   endforeach()
   target_compile_options(graphics_webgpu_wagyu PRIVATE "--use-port=${DEFOLD_SDK_ROOT}/ext/wagyu-port/webgpu-port.py:wagyu=true")
+
+  # wasmcart WebGPU cart backend. The same adapter source, compiled against
+  # Dawn's emdawnwebgpu port: the cart carries the port's C++ half and the
+  # wasmcart host supplies the matching JavaScript half, so the cart MUST be
+  # built against the exact emdawnwebgpu release the host was generated from.
+  # Point DEFOLD_EMDAWNWEBGPU_PORT (env or cache) at that release's
+  # emdawnwebgpu.port.py; without it only the GL cart is built.
+  if(DEFOLD_WASMCART)
+    # Cached so engine/engine (another directory scope) links with the same
+    # port the library was compiled against.
+    if(DEFINED ENV{DEFOLD_EMDAWNWEBGPU_PORT})
+      set(DEFOLD_EMDAWNWEBGPU_PORT "$ENV{DEFOLD_EMDAWNWEBGPU_PORT}" CACHE FILEPATH "emdawnwebgpu.port.py for the wasmcart WebGPU cart" FORCE)
+    endif()
+    if(DEFOLD_EMDAWNWEBGPU_PORT)
+      if(NOT EXISTS "${DEFOLD_EMDAWNWEBGPU_PORT}")
+        message(FATAL_ERROR "DEFOLD_EMDAWNWEBGPU_PORT does not exist: ${DEFOLD_EMDAWNWEBGPU_PORT}")
+      endif()
+      defold_add_library(graphics_webgpu_wasmcart STATIC ${GRAPHICS_WEBGPU_SOURCES} ${GRAPHICS_PROTO_OBJECTS})
+      graphics_common_setup(graphics_webgpu_wasmcart)
+      target_include_directories(graphics_webgpu_wasmcart PUBLIC "${GRAPHICS_SRC_DIR}/webgpu")
+      target_compile_definitions(graphics_webgpu_wasmcart PUBLIC DM_GRAPHICS_WEBGPU DM_GRAPHICS_WEBGPU_WASMCART)
+      target_compile_options(graphics_webgpu_wasmcart PRIVATE "--use-port=${DEFOLD_EMDAWNWEBGPU_PORT}")
+      defold_target_link_libraries(graphics_webgpu_wasmcart "${TARGET_PLATFORM}" SCOPE PUBLIC ${GRAPHICS_DEPENDENCIES})
+      set_target_properties(graphics_webgpu_wasmcart PROPERTIES DEFOLD_SDK_HEADERS_TARGET graphics_sdk_headers)
+      list(APPEND GRAPHICS_INSTALL_TARGETS graphics_webgpu_wasmcart)
+    else()
+      message(STATUS "graphics_webgpu_wasmcart: DEFOLD_EMDAWNWEBGPU_PORT not set, WebGPU cart not built")
+    endif()
+  endif()
 endif()
 
 if(GRAPHICS_BUILD_VULKAN)

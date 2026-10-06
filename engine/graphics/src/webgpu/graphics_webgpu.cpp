@@ -50,6 +50,52 @@
 using namespace dmGraphics;
 using namespace dmVMath;
 
+#if defined(DM_GRAPHICS_WEBGPU_WASMCART)
+// wasmcart WebGPU cart. Differences from the browser build, all forced by the
+// cart ABI rather than chosen:
+//   - The HOST owns the device. emscripten_webgpu_get_device() hands it over
+//     synchronously, so there is no adapter/device request and no wait. A
+//     cart has no Asyncify, and wgpuInstanceWaitAny with a timeout is not
+//     available, so the browser path (request + WaitAny) cannot run here.
+//   - There is therefore no WGPUAdapter. Feature queries go to the device.
+//   - The device is imported, so an uncaptured-error callback cannot be
+//     attached to it. Errors are collected with an error scope that is kept
+//     open across each frame and popped after the frame's submit; the result
+//     arrives on the host's event loop between frames.
+//   - The host presents after wc_render; the cart never calls present.
+namespace dmGraphics
+{
+    // Per-frame counters the cart shim reports (also defined by the GL
+    // backend; a cart links exactly one of the two).
+    uint32_t g_WcDrawCalls = 0;
+    uint32_t g_WcTriangles = 0;
+    uint32_t g_WcFlips     = 0;
+}
+
+static void WebGPUWasmcartPopErrorScopeCallback(WGPUPopErrorScopeStatus status, WGPUErrorType type, WGPUStringView message, void* userdata1, void*)
+{
+    if (status != WGPUPopErrorScopeStatus_Success || type == WGPUErrorType_NoError)
+        return;
+    static uint32_t s_Reported = 0;
+    if (s_Reported >= 32)
+        return; // a broken pipeline repeats every frame; the first ones are the diagnosis
+    s_Reported++;
+    dmLogError("WebGPU error (%d): %.*s", (int)type, message.data ? (int)message.length : 0, message.data ? message.data : "");
+}
+
+static void WebGPUWasmcartRollErrorScope(WGPUDevice device, bool pop)
+{
+    if (pop)
+    {
+        WGPUPopErrorScopeCallbackInfo info = WGPU_POP_ERROR_SCOPE_CALLBACK_INFO_INIT;
+        info.mode     = WGPUCallbackMode_AllowSpontaneous;
+        info.callback = WebGPUWasmcartPopErrorScopeCallback;
+        wgpuDevicePopErrorScope(device, info);
+    }
+    wgpuDevicePushErrorScope(device, WGPUErrorFilter_Validation);
+}
+#endif
+
 static const WGPUAddressMode g_webgpu_address_mode[] = {
     WGPUAddressMode_ClampToEdge,
     WGPUAddressMode_ClampToEdge,
@@ -1420,6 +1466,16 @@ static void instanceRequestAdapterCallback(WGPURequestAdapterStatus status, WGPU
     }
 }
 
+// What the device can do. The device is what was created, so it is the
+// answer; the adapter is only a fallback for a device-less query, and a
+// wasmcart cart has no adapter at all (the host owns the device).
+static bool WebGPUHasFeature(WebGPUContext* context, WGPUFeatureName feature)
+{
+    if (context->m_Device)
+        return wgpuDeviceHasFeature(context->m_Device, feature);
+    return context->m_Adapter && wgpuAdapterHasFeature(context->m_Adapter, feature);
+}
+
 static bool InitializeWebGPUContext(WebGPUContext* context, const ContextParams& params)
 {
     TRACE_CALL;
@@ -1456,7 +1512,20 @@ static bool InitializeWebGPUContext(WebGPUContext* context, const ContextParams&
         return false;
     }
 
-#if defined(DM_GRAPHICS_WEBGPU2)
+#if defined(DM_GRAPHICS_WEBGPU_WASMCART)
+    {
+        // The host's device, synchronously. Then the same setup the browser
+        // path runs from its request-device callback.
+        WGPUDevice device = emscripten_webgpu_get_device();
+        if (!device)
+        {
+            dmLogError("WebGPU: the host provided no device");
+            return false;
+        }
+        requestDeviceCallback(WGPURequestDeviceStatus_Success, device, WGPUStringView{NULL, 0}, context, NULL);
+        WebGPUWasmcartRollErrorScope(context->m_Device, false);
+    }
+#elif defined(DM_GRAPHICS_WEBGPU2)
     WGPURequestAdapterCallbackInfo requestAdapterCallbackInfo = WGPU_REQUEST_ADAPTER_CALLBACK_INFO_INIT;
     requestAdapterCallbackInfo.mode                           = WGPUCallbackMode_WaitAnyOnly;
     requestAdapterCallbackInfo.callback                       = instanceRequestAdapterCallback;
@@ -1482,7 +1551,11 @@ static bool InitializeWebGPUContext(WebGPUContext* context, const ContextParams&
     // Every asynchronous initialization stage may fail independently. Do not
     // initialize backend state unless the adapter, device, queue, and complete
     // presentation path are all valid.
+#if defined(DM_GRAPHICS_WEBGPU_WASMCART)
+    if (!context->m_Device || !context->m_Queue ||
+#else
     if (!context->m_Adapter || !context->m_Device || !context->m_Queue ||
+#endif
         !context->m_Surface || context->m_Format == WGPUTextureFormat_Undefined)
         return false;
 
@@ -1549,7 +1622,7 @@ static bool InitializeWebGPUContext(WebGPUContext* context, const ContextParams&
     context->m_BaseContext.m_TextureFormatSupport |= 1ULL << TEXTURE_FORMAT_RGBA_16BPP;
     context->m_BaseContext.m_TextureFormatSupport |= 1ULL << TEXTURE_FORMAT_LUMINANCE;
     context->m_BaseContext.m_TextureFormatSupport |= 1ULL << TEXTURE_FORMAT_LUMINANCE_ALPHA;
-    if (wgpuAdapterHasFeature(context->m_Adapter, WGPUFeatureName_TextureCompressionASTC))
+    if (WebGPUHasFeature(context, WGPUFeatureName_TextureCompressionASTC))
     {
         context->m_BaseContext.m_TextureFormatSupport |= 1ULL << TEXTURE_FORMAT_RGBA_ASTC_4X4;
         context->m_BaseContext.m_TextureFormatSupport |= 1ULL << TEXTURE_FORMAT_RGBA_ASTC_5X4;
@@ -1566,7 +1639,7 @@ static bool InitializeWebGPUContext(WebGPUContext* context, const ContextParams&
         context->m_BaseContext.m_TextureFormatSupport |= 1ULL << TEXTURE_FORMAT_RGBA_ASTC_12X10;
         context->m_BaseContext.m_TextureFormatSupport |= 1ULL << TEXTURE_FORMAT_RGBA_ASTC_12X12;
     }
-    if (wgpuAdapterHasFeature(context->m_Adapter, WGPUFeatureName_TextureCompressionBC))
+    if (WebGPUHasFeature(context, WGPUFeatureName_TextureCompressionBC))
     {
         context->m_BaseContext.m_TextureFormatSupport |= 1ULL << TEXTURE_FORMAT_RGB_BC1;
         context->m_BaseContext.m_TextureFormatSupport |= 1ULL << TEXTURE_FORMAT_RGBA_BC3;
@@ -1576,7 +1649,7 @@ static bool InitializeWebGPUContext(WebGPUContext* context, const ContextParams&
         // WebGPU (unlike WebGL2) allows BC formats on array/3D targets.
         SetContextFeatureSupported(&context->m_BaseContext, CONTEXT_FEATURE_BC_ARRAY_TEXTURES);
     }
-    if (wgpuAdapterHasFeature(context->m_Adapter, WGPUFeatureName_TextureCompressionETC2))
+    if (WebGPUHasFeature(context, WGPUFeatureName_TextureCompressionETC2))
     {
         // ETC1 payloads decode identically under ETC2, so an ETC2 capable adapter can consume
         // them as-is (uploaded with the ETC2RGB8Unorm format, see WebGPUFormatFromTextureFormat).
@@ -1736,6 +1809,11 @@ static HContext WebGPUNewContext(const ContextParams& params)
 static bool WebGPUIsSupported()
 {
     TRACE_CALL;
+#if defined(DM_GRAPHICS_WEBGPU_WASMCART)
+    // A cart built for WebGPU is only ever loaded by a host that provides it
+    // (the host refuses the cart otherwise), and there is no JS to ask.
+    return true;
+#else
     return MAIN_THREAD_EM_ASM_INT({
         if (typeof window !== 'undefined' && typeof document !== 'undefined') {
             return Module.hasWebGPUSupport() ? 1 : 0;
@@ -1743,6 +1821,7 @@ static bool WebGPUIsSupported()
         // if running outside of the browser - return true by default
         return 1;
     }) == 1;
+#endif
 }
 
 static HContext WebGPUGetContext()
@@ -1771,7 +1850,7 @@ static void WebGPUDeleteContext(HContext _context)
 static void WebGPURunApplicationLoop(void* user_data, WindowStepMethod step_method, WindowIsRunning is_running)
 {
     TRACE_CALL;
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) && !defined(DM_GRAPHICS_WEBGPU_WASMCART)
     while (0 != is_running(user_data))
     {
         // N.B. Beyond the first test, the above statement is essentially formal since set_main_loop will throw an exception.
@@ -2018,6 +2097,12 @@ static WGPURenderPassEncoder RenderPassBegin(WebGPUContext* context, uint32_t cl
     // depth/stencil
 #if defined(DM_GRAPHICS_WEBGPU2)
     WGPURenderPassDepthStencilAttachment dsAttachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+    // The stable header initialises depthClearValue to NaN ("undefined").
+    // emdawnwebgpu forwards it verbatim, and GPURenderPassDepthStencilAttachment
+    // declares it a (restricted) float, so a NaN throws a TypeError in
+    // beginRenderPass even when the depth load op is Load. Give it a finite
+    // value; it is only read when depthLoadOp is Clear, which sets it below.
+    dsAttachment.depthClearValue = 1.0f;
 #else
     WGPURenderPassDepthStencilAttachment dsAttachment = {};
 #endif
@@ -2235,6 +2320,12 @@ static void WebGPUFlip(HContext _context)
         dmLogFatal("WebGPU validation failed; see the preceding uncaptured error");
     WebGPUSubmitCommandEncoder(context);
     context->m_CurrentRenderTarget = NULL;
+#if defined(DM_GRAPHICS_WEBGPU_WASMCART)
+    g_WcFlips++;
+    // Collect this frame's validation errors (reported between frames) and
+    // open the scope for the next one.
+    WebGPUWasmcartRollErrorScope(context->m_Device, true);
+#endif
     {
 #if !defined(__EMSCRIPTEN__)
         wgpuSurfacePresent(context->m_Surface);
@@ -2986,6 +3077,9 @@ static void WebGPUDrawElements(HContext _context, PrimitiveType prim_type, uint3
     context->m_CurrentPipelineState.m_PrimtiveType = prim_type;
     WebGPUSetupRenderPipeline(context, (WebGPUBuffer*)index_buffer, type);
     wgpuRenderPassEncoderDrawIndexed(context->m_CurrentRenderPass.m_Encoder, count, dmMath::Max(1u, instance_count), first / (type == TYPE_UNSIGNED_SHORT ? 2 : 4), 0, 0);
+#if defined(DM_GRAPHICS_WEBGPU_WASMCART)
+    g_WcDrawCalls++; g_WcTriangles += (count / 3) * dmMath::Max(1u, instance_count);
+#endif
 }
 
 static void WebGPUDraw(HContext _context, PrimitiveType prim_type, uint32_t first, uint32_t count, uint32_t instance_count)
@@ -2996,6 +3090,9 @@ static void WebGPUDraw(HContext _context, PrimitiveType prim_type, uint32_t firs
     context->m_CurrentPipelineState.m_PrimtiveType = prim_type;
     WebGPUSetupRenderPipeline(context, NULL, TYPE_BYTE);
     wgpuRenderPassEncoderDraw(context->m_CurrentRenderPass.m_Encoder, count, dmMath::Max(1u, instance_count), first, 0);
+#if defined(DM_GRAPHICS_WEBGPU_WASMCART)
+    g_WcDrawCalls++; g_WcTriangles += (count / 3) * dmMath::Max(1u, instance_count);
+#endif
 }
 
 static void WebGPUDispatchCompute(HContext _context, uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z)

@@ -26,7 +26,10 @@
 
 #include "../graphics_private.h"
 
-#ifdef DM_GRAPHICS_WEBGPU_WAGYU
+// The wasmcart WebGPU cart is built against Dawn's emdawnwebgpu port, which
+// speaks the stable webgpu.h (WGPUStringView, callback-info structs, WGPULimits):
+// the same API generation as the Wagyu header, without the Wagyu extensions.
+#if defined(DM_GRAPHICS_WEBGPU_WAGYU) || defined(DM_GRAPHICS_WEBGPU_WASMCART)
 #define DM_GRAPHICS_WEBGPU2
 #endif
 

@@ -40,6 +40,7 @@ extern "C" void dmExportedSymbols(); // Found in "__exported_symbols.cpp"
 
 #define WC_ABI_VERSION     4
 #define WC_GPU_API_GLES3   1
+#define WC_GPU_API_WEBGPU  2
 #define WC_FLAG_AUDIO_F32  (1 << 0)
 #define WC_FLAG_POINTER    (1 << 3)
 #define WC_FLAG_KEYBOARD   (1 << 4)
@@ -213,7 +214,12 @@ wc_info_t* wc_get_info(void)
     g_Info.version     = WC_ABI_VERSION;
     g_Info.width       = s_ResolutionResolved ? resolved_w : WASMCART_DEFAULT_WIDTH;
     g_Info.height      = s_ResolutionResolved ? resolved_h : WASMCART_DEFAULT_HEIGHT;
+#if defined(DM_WASMCART_WEBGPU)
+    // Built on the WebGPU adapter against the host's emdawnwebgpu release.
+    g_Info.gpu_api     = WC_GPU_API_WEBGPU;
+#else
     g_Info.gpu_api     = WC_GPU_API_GLES3;
+#endif
     g_Info.flags       = WC_FLAG_AUDIO_F32 | WC_FLAG_POINTER | WC_FLAG_KEYBOARD;
     g_Info.audio_ptr       = (uint32_t)(uintptr_t) dmDeviceWasmcart::g_AudioRing;
     g_Info.audio_cap       = dmDeviceWasmcart::GetRingFrameCount();
