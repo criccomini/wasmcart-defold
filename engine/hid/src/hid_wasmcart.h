@@ -12,19 +12,16 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-#ifndef DM_SCRIPT_ENGINE_H
-#define DM_SCRIPT_ENGINE_H
+#ifndef DM_HID_WASMCART_H
+#define DM_HID_WASMCART_H
 
-#include <dmsdk/script/script.h>
-#include "../engine.h"
+#include <stdint.h>
 
-namespace dmEngine
+namespace dmHID
 {
-    void ScriptSysEngineInitialize(lua_State* L, dmEngine::HEngine engine);
-    void ScriptSysEngineFinalize(lua_State* L, dmEngine::HEngine engine);
-#if defined(DM_PLATFORM_WASMCART)
-    void ScriptWasmcartInitialize(lua_State* L);
-#endif
+    // Resolve action.gamepad through the live driver table. Returns false
+    // before driver creation, after destruction, or for an absent device.
+    bool GetWasmcartPadIndex(uint32_t gamepad_index, uint32_t* pad_index);
 }
 
-#endif // #ifndef DM_SCRIPT_ENGINE_H
+#endif // DM_HID_WASMCART_H

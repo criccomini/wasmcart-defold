@@ -120,6 +120,12 @@ namespace dmPlatform
     // The host's name for a pad, or null when it reported none.
     const char* WasmcartGetPadName(uint32_t index);
 
+    // Host rumble imports, implemented by the cart shim. Indices are host
+    // pad slots; Lua callers must resolve their Defold gamepad first.
+    bool WasmcartPadHasRumble(uint32_t index);
+    void WasmcartPadRumble(uint32_t index, float low, float high, uint32_t duration_ms);
+    void WasmcartPadRumbleStop(uint32_t index);
+
     // Persistent save storage, backed by the ABI's save block (the host
     // persists that region across sessions). A cart has no filesystem, so
     // sys.save/sys.load route here instead of through fopen.

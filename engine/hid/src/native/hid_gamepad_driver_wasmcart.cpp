@@ -39,6 +39,7 @@
 #include <platform/window.hpp>
 
 #include "hid.h"
+#include "hid_wasmcart.h"
 #include "hid_private.h"
 #include "hid_native_private.h"
 
@@ -95,6 +96,26 @@ namespace dmHID
             }
         }
         return 0;
+    }
+
+    bool GetWasmcartPadIndex(uint32_t gamepad_index, uint32_t* pad_index)
+    {
+        WasmcartGamepadDriver* driver = g_WasmcartGamepadDriver;
+        if (!driver || gamepad_index >= MAX_GAMEPAD_COUNT)
+        {
+            return false;
+        }
+
+        // CreateGamepad allocates the first free HID entry. Its index can
+        // differ from the host slot when pads connect out of order.
+        Gamepad* gamepad = &driver->m_HidContext->m_Gamepads[gamepad_index];
+        WasmcartGamepadDevice* device = FindDevice(driver, gamepad);
+        if (!device || !gamepad->m_Connected)
+        {
+            return false;
+        }
+        *pad_index = device->m_Index;
+        return true;
     }
 
     static bool HasDeviceForIndex(WasmcartGamepadDriver* driver, uint32_t index)

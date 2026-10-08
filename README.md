@@ -116,6 +116,29 @@ migration script for pre-1.13 projects live in
 [wasmcart-defold-examples](https://github.com/wasmcart/wasmcart-defold-examples),
 which carries twelve carts including five complete games.
 
+## Rumble
+
+The wasmcart engine exposes these Lua functions:
+
+```lua
+wasmcart.pad_has_rumble(action.gamepad) -- boolean
+wasmcart.pad_rumble(action.gamepad, 1.0, 0.0, 300) -- low, high, milliseconds
+wasmcart.pad_rumble_stop(action.gamepad)
+```
+
+Pass the index from `action.gamepad`. The driver maps it to the current
+host pad slot, including pads that connect out of order.
+
+Motor strengths must be numbers from 0 to 1. Duration must be non-negative
+and fit in a uint32. It is truncated to whole milliseconds and capped at
+5000 ms. Re-arm each frame for sustained rumble, then stop on release.
+The two motor functions return no values.
+
+Absent or invalid numeric gamepad indices return false from
+`pad_has_rumble`; the motor functions do nothing. Devices without motors
+and hosts that stub missing imports with zero or -1 behave the same way.
+Invalid strengths or durations raise a Lua argument error.
+
 ## WebGPU carts
 
 The same build also produces a WebGPU cart (`wc_info_t.gpu_api = 2`) from
@@ -191,7 +214,7 @@ The port itself is eight new files plus edits threaded through existing ones:
 
 ## ABI
 
-wasmcart ABI v3. The cart exports `wc_get_info`, `wc_init` and `wc_render`, and
+wasmcart ABI v4. The cart exports `wc_get_info`, `wc_init` and `wc_render`, and
 declares GLES3 as its GPU API. Pads, pointer, keyboard, audio ring, save block
 and the host clock are all wired.
 
