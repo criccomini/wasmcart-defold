@@ -231,7 +231,7 @@ union SaveLoadBuffer
         if (!wrote)
         {
             return luaL_error(L, "Could not write to the file %s. The cart save block is full or the data exceeds %d bytes.",
-                filename, WASMCART_SAVE_MAX_FILE);
+                filename, (int)dmPlatform::WasmcartGetSaveMaxFileSize());
         }
         lua_pushboolean(L, 1);
         return 1;

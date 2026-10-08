@@ -116,6 +116,57 @@ migration script for pre-1.13 projects live in
 [wasmcart-defold-examples](https://github.com/wasmcart/wasmcart-defold-examples),
 which carries twelve carts including five complete games.
 
+## Save capacity
+
+`sys.save` and `sys.load` use the host's persistent save region. To raise its
+capacity, add this to `game.project` and rebuild the cart:
+
+```ini
+[wasmcart]
+save_size = 1048576
+```
+
+`wasmcart.save_size` is the total region size in bytes, including the file
+table. The default is **132144 bytes**, the original eight 16 KiB slots and
+their metadata. The engine clamps values to 132144–4194304 bytes and logs the
+chosen total and per-file limit. Invalid integers use the default.
+
+The region holds at most eight files. Each has a 128-byte name field, a
+4-byte length, and an equal share of the payload space. The per-file limit is
+`floor(((save_size - 16) / 8 - 132) / 4) * 4` bytes. At 1 MiB this is 130936
+bytes; at 4 MiB it is 524152 bytes. Names must fit in 127 bytes. A file cannot
+borrow an unused slot's space.
+
+Couchmix allows **4 MiB per game per profile** and refuses larger regions.
+The engine allocates the chosen region once in the cart's wasm memory, before
+the host restores saves. That allocation stays for the session and counts
+against Couchmix's roughly 1 GiB game memory budget. Save serialization also
+uses a temporary buffer; raising the capacity does not reserve 4 MiB for
+games that keep the default.
+
+The default keeps the original save format. Larger regions use a versioned
+header and migrate restored version 1 or smaller version 2 slots in place,
+without allocating a second block. The host must copy the smaller saved block
+into the larger region and zero-fill the remainder for this migration to run.
+
+**Couchmix's current runner rejects saved files whose length differs from the
+region size.** Capacity increases for games with existing saves need a runner
+change to restore smaller blocks with zero padding. The engine cannot migrate
+bytes the host refuses to restore. Keeping the default loads old saves without
+a runner change.
+
+Keep the same capacity or raise it in later releases. Lowering it can lose
+saved data on hosts that copy a truncated prefix; the engine refuses access
+to a restored layout with larger slots.
+
+The block logic has a standalone host test. No Defold build is needed:
+
+```bash
+c++ -std=c++11 -Wall -Wextra -Werror \
+    engine/platform/src/test/test_wasmcart_save.cpp -o /tmp/test_wasmcart_save
+/tmp/test_wasmcart_save
+```
+
 ## Rumble
 
 The wasmcart engine exposes these Lua functions:

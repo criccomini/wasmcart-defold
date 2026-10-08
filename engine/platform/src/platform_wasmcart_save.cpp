@@ -12,140 +12,196 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-// Persistent save storage for wasmcart carts.
+// Persistent save storage for wasmcart carts. The host restores the byte
+// region before wc_init and persists it verbatim. No pointers live in it.
 //
-// A cart is a standalone wasm module with no filesystem: every fopen in
-// sys.save fails, which is why sys.save reported "Could not write to the
-// file" on this port. What a cart DOES have is the ABI's save block - a
-// fixed-size region of its own linear memory that the host persists across
-// sessions and restores on load (wc_info_t::save_ptr / save_size).
-//
-// So this is a tiny fixed-capacity store laid out inside that block, keyed by
-// the same path strings sys.get_save_file produces. It is deliberately small
-// and flat: a handful of files of a few KB each covers what sys.save is for
-// (settings, progress, high scores) and keeps the whole directory scannable
-// without an allocator, which matters because the host copies this region
-// verbatim and any pointer stored in it would be meaningless on reload.
-//
-// Layout, all little-endian, written in place so the host's byte copy is the
-// entire persistence mechanism:
-//
-//   magic    u32   'WCSV'  - distinguishes an initialised block from the
-//                            zero-fill a first run sees
-//   version  u32   1
-//   count    u32   number of live entries
-//   reserved u32
-//   entries[WASMCART_SAVE_MAX_FILES]:
-//     name   char[WASMCART_SAVE_MAX_NAME]  NUL-terminated
-//     size   u32
-//     data   u8[WASMCART_SAVE_MAX_FILE]
+// Little-endian layout (unchanged for the default capacity):
+//   magic u32 'WCSV', version u32, count u32, file_capacity u32
+//   eight slots: name char[128], size u32, data u8[file_capacity]
+// Version 1 has a reserved zero in place of file_capacity and 16 KiB slots.
+// Version 2 records the capacity. Larger configurations migrate version 1
+// in place on first access, after the host has restored it.
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "platform_window_wasmcart.h"
 
 namespace dmPlatform
 {
-    static const uint32_t WASMCART_SAVE_MAGIC   = 0x56534357; // 'WCSV' little-endian
-    static const uint32_t WASMCART_SAVE_VERSION = 1;
+    static const uint32_t WASMCART_SAVE_MAGIC = 0x56534357; // 'WCSV'
+
+    struct SaveHeader
+    {
+        uint32_t m_Magic;
+        uint32_t m_Version;
+        uint32_t m_Count;
+        uint32_t m_FileCapacity;
+    };
 
     struct SaveEntry
     {
         char     m_Name[WASMCART_SAVE_MAX_NAME];
         uint32_t m_Size;
-        uint8_t  m_Data[WASMCART_SAVE_MAX_FILE];
+        // Payload follows immediately, with no pointer in the saved bytes.
     };
 
-    struct SaveBlock
+    static_assert(sizeof(SaveHeader) == 16, "Save header layout changed");
+    static_assert(sizeof(SaveEntry) == 132, "Save entry layout changed");
+    static_assert(WASMCART_SAVE_DEFAULT_SIZE == 132144, "Legacy save size changed");
+
+    static uint8_t* g_SaveBlock = 0;
+    static uint32_t g_SaveSize = 0;
+    static uint32_t g_FileCapacity = 0;
+    static bool g_Configured = false;
+
+    bool WasmcartConfigureSave(int64_t size)
     {
-        uint32_t  m_Magic;
-        uint32_t  m_Version;
-        uint32_t  m_Count;
-        uint32_t  m_Reserved;
-        SaveEntry m_Entries[WASMCART_SAVE_MAX_FILES];
-    };
+        if (g_Configured)
+            return g_SaveBlock != 0;
+        g_Configured = true;
+        if (size < WASMCART_SAVE_DEFAULT_SIZE)
+            size = WASMCART_SAVE_DEFAULT_SIZE;
+        if (size > WASMCART_SAVE_MAX_SIZE)
+            size = WASMCART_SAVE_MAX_SIZE;
 
-    // Lives in the cart's own linear memory: the shim publishes its address
-    // as save_ptr and the host persists exactly sizeof(SaveBlock) bytes.
-    static SaveBlock g_SaveBlock;
+        // Keep slot headers aligned to four bytes. Up to 31 trailing bytes
+        // remain unused; the total published to the host is the chosen size.
+        g_FileCapacity = (((uint32_t)size - sizeof(SaveHeader)) / WASMCART_SAVE_MAX_FILES - sizeof(SaveEntry)) & ~3u;
+        g_SaveBlock = (uint8_t*)calloc(1, (size_t)size);
+        if (!g_SaveBlock)
+        {
+            g_FileCapacity = 0;
+            return false;
+        }
+        g_SaveSize = (uint32_t)size;
+        return true;
+    }
 
     void* WasmcartGetSaveBlock()
     {
-        return &g_SaveBlock;
+        WasmcartConfigureSave(WASMCART_SAVE_DEFAULT_SIZE);
+        return g_SaveBlock;
     }
 
     uint32_t WasmcartGetSaveBlockSize()
     {
-        return (uint32_t) sizeof(SaveBlock);
+        WasmcartGetSaveBlock();
+        return g_SaveSize;
     }
 
-    // A host that restored a block from an earlier session hands it back
-    // verbatim; a first run hands back zeroes. Both are handled here rather
-    // than by a separate "is this the first run" flag, which could disagree
-    // with the block's own contents.
-    static SaveBlock* GetBlock()
+    uint32_t WasmcartGetSaveMaxFileSize()
     {
-        if (g_SaveBlock.m_Magic != WASMCART_SAVE_MAGIC ||
-            g_SaveBlock.m_Version != WASMCART_SAVE_VERSION)
-        {
-            memset(&g_SaveBlock, 0, sizeof(g_SaveBlock));
-            g_SaveBlock.m_Magic   = WASMCART_SAVE_MAGIC;
-            g_SaveBlock.m_Version = WASMCART_SAVE_VERSION;
-            g_SaveBlock.m_Count   = 0;
-        }
-        // A corrupt or truncated restore could claim more entries than exist.
-        if (g_SaveBlock.m_Count > WASMCART_SAVE_MAX_FILES)
-        {
-            g_SaveBlock.m_Count = WASMCART_SAVE_MAX_FILES;
-        }
-        return &g_SaveBlock;
+        WasmcartGetSaveBlock();
+        return g_FileCapacity;
     }
 
-    static SaveEntry* FindEntry(SaveBlock* block, const char* name)
+    static SaveEntry* EntryAt(uint32_t index, uint32_t capacity)
     {
+        return (SaveEntry*)(g_SaveBlock + sizeof(SaveHeader) + index * (sizeof(SaveEntry) + capacity));
+    }
+
+    static uint8_t* EntryData(SaveEntry* entry)
+    {
+        return (uint8_t*)entry + sizeof(SaveEntry);
+    }
+
+    static SaveHeader* ResetBlock()
+    {
+        memset(g_SaveBlock, 0, g_SaveSize);
+        SaveHeader* block = (SaveHeader*)g_SaveBlock;
+        block->m_Magic = WASMCART_SAVE_MAGIC;
+        block->m_Version = g_FileCapacity == WASMCART_SAVE_DEFAULT_FILE ? 1 : 2;
+        block->m_FileCapacity = block->m_Version == 1 ? 0 : g_FileCapacity;
+        return block;
+    }
+
+    static SaveHeader* GetBlock()
+    {
+        if (!WasmcartGetSaveBlock())
+            return 0;
+        SaveHeader* block = (SaveHeader*)g_SaveBlock;
+        if (block->m_Magic != WASMCART_SAVE_MAGIC ||
+            (block->m_Version != 1 && block->m_Version != 2))
+            return ResetBlock();
+
+        uint32_t old_capacity = block->m_Version == 1 ? WASMCART_SAVE_DEFAULT_FILE : block->m_FileCapacity;
+        const uint32_t max_capacity = ((WASMCART_SAVE_MAX_SIZE - sizeof(SaveHeader)) / WASMCART_SAVE_MAX_FILES - sizeof(SaveEntry)) & ~3u;
+        if (block->m_Count > WASMCART_SAVE_MAX_FILES || old_capacity < WASMCART_SAVE_DEFAULT_FILE ||
+            old_capacity > max_capacity || (old_capacity & 3u))
+            return ResetBlock();
+
+        // A smaller configuration cannot safely restore a larger layout.
+        // Refuse access rather than write new entries over the restored data.
+        if (old_capacity > g_FileCapacity)
+            return 0;
+
+        // Validate before moving anything, including sizes used by sys.load
+        // to allocate a deserialization buffer. Never copy beyond a slot.
         for (uint32_t i = 0; i < block->m_Count; ++i)
         {
-            if (strncmp(block->m_Entries[i].m_Name, name, WASMCART_SAVE_MAX_NAME) == 0)
+            SaveEntry* entry = EntryAt(i, old_capacity);
+            if (!entry->m_Name[0] || !memchr(entry->m_Name, 0, sizeof(entry->m_Name)) || entry->m_Size > old_capacity)
+                return ResetBlock();
+        }
+
+        if (old_capacity != g_FileCapacity)
+        {
+            // Work backwards so expanding a slot cannot overwrite the next
+            // old entry before it is moved. No second block is allocated.
+            for (uint32_t i = block->m_Count; i > 0; --i)
             {
-                return &block->m_Entries[i];
+                SaveEntry* src = EntryAt(i - 1, old_capacity);
+                SaveEntry* dst = EntryAt(i - 1, g_FileCapacity);
+                uint32_t size = src->m_Size;
+                memmove(dst, src, sizeof(SaveEntry) + size);
+                memset(EntryData(dst) + size, 0, g_FileCapacity - size);
             }
+            uint32_t used = sizeof(SaveHeader) + block->m_Count * (sizeof(SaveEntry) + g_FileCapacity);
+            memset(g_SaveBlock + used, 0, g_SaveSize - used);
+            block->m_Version = 2;
+            block->m_FileCapacity = g_FileCapacity;
+        }
+        return block;
+    }
+
+    static SaveEntry* FindEntry(SaveHeader* block, const char* name)
+    {
+        if (!block)
+            return 0;
+        for (uint32_t i = 0; i < block->m_Count; ++i)
+        {
+            SaveEntry* entry = EntryAt(i, g_FileCapacity);
+            if (strncmp(entry->m_Name, name, WASMCART_SAVE_MAX_NAME) == 0)
+                return entry;
         }
         return 0;
     }
 
     bool WasmcartSaveWrite(const char* name, const void* data, uint32_t size)
     {
-        if (!name || !name[0] || size > WASMCART_SAVE_MAX_FILE)
-        {
+        if (!name || !name[0] || (size && !data) || size > WasmcartGetSaveMaxFileSize() ||
+            strlen(name) >= WASMCART_SAVE_MAX_NAME)
             return false;
-        }
-        if (strlen(name) >= WASMCART_SAVE_MAX_NAME)
-        {
-            return false;
-        }
 
-        SaveBlock* block = GetBlock();
+        SaveHeader* block = GetBlock();
+        if (!block)
+            return false;
         SaveEntry* entry = FindEntry(block, name);
-        if (entry == 0)
+        if (!entry)
         {
             if (block->m_Count >= WASMCART_SAVE_MAX_FILES)
-            {
                 return false;
-            }
-            entry = &block->m_Entries[block->m_Count++];
-            memset(entry, 0, sizeof(*entry));
+            entry = EntryAt(block->m_Count++, g_FileCapacity);
+            memset(entry, 0, sizeof(SaveEntry));
             strncpy(entry->m_Name, name, WASMCART_SAVE_MAX_NAME - 1);
         }
 
-        // Zero the tail as well as writing the payload: the block is copied
-        // whole, so a shorter rewrite that left old bytes behind would ship
-        // the previous save's data inside this one's slot.
-        memset(entry->m_Data, 0, WASMCART_SAVE_MAX_FILE);
-        if (size && data)
-        {
-            memcpy(entry->m_Data, data, size);
-        }
+        // The host persists the whole slot, so erase the previous payload.
+        memset(EntryData(entry), 0, g_FileCapacity);
+        if (size)
+            memcpy(EntryData(entry), data, size);
         entry->m_Size = size;
         return true;
     }
@@ -153,23 +209,16 @@ namespace dmPlatform
     bool WasmcartSaveRead(const char* name, void* data, uint32_t capacity, uint32_t* out_size)
     {
         if (!name || !name[0])
-        {
             return false;
-        }
-        SaveBlock* block = GetBlock();
-        SaveEntry* entry = FindEntry(block, name);
-        if (entry == 0)
-        {
+        SaveEntry* entry = FindEntry(GetBlock(), name);
+        if (!entry)
             return false;
-        }
         if (out_size)
-        {
             *out_size = entry->m_Size;
-        }
         if (data && capacity)
         {
             uint32_t n = entry->m_Size < capacity ? entry->m_Size : capacity;
-            memcpy(data, entry->m_Data, n);
+            memcpy(data, EntryData(entry), n);
         }
         return true;
     }
@@ -177,31 +226,26 @@ namespace dmPlatform
     bool WasmcartSaveExists(const char* name)
     {
         if (!name || !name[0])
-        {
             return false;
-        }
         return FindEntry(GetBlock(), name) != 0;
     }
 
     bool WasmcartSaveUnlink(const char* name)
     {
         if (!name || !name[0])
-        {
             return false;
-        }
-        SaveBlock* block = GetBlock();
+        SaveHeader* block = GetBlock();
+        if (!block)
+            return false;
         for (uint32_t i = 0; i < block->m_Count; ++i)
         {
-            if (strncmp(block->m_Entries[i].m_Name, name, WASMCART_SAVE_MAX_NAME) == 0)
+            SaveEntry* entry = EntryAt(i, g_FileCapacity);
+            if (strncmp(entry->m_Name, name, WASMCART_SAVE_MAX_NAME) == 0)
             {
-                // Swap the last entry into the hole rather than shifting: the
-                // directory has no ordering contract and a memmove of the
-                // whole tail would copy megabytes to delete one file.
-                if (i != block->m_Count - 1)
-                {
-                    memcpy(&block->m_Entries[i], &block->m_Entries[block->m_Count - 1], sizeof(SaveEntry));
-                }
-                memset(&block->m_Entries[block->m_Count - 1], 0, sizeof(SaveEntry));
+                SaveEntry* last = EntryAt(block->m_Count - 1, g_FileCapacity);
+                if (entry != last)
+                    memcpy(entry, last, sizeof(SaveEntry) + g_FileCapacity);
+                memset(last, 0, sizeof(SaveEntry) + g_FileCapacity);
                 block->m_Count--;
                 return true;
             }
