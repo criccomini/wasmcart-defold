@@ -267,13 +267,16 @@
 // Texture formats
 // Some platforms (e.g Android) supports texture formats even when undefined
 // We check this at runtime through extensions supported
-#if defined(GL_RED) && !defined (__EMSCRIPTEN__)
+// A wasmcart uses native GLES3 imports, even though it is compiled by
+// Emscripten. Its glyph subuploads must use RED/RG: native GLES3 rejects
+// LUMINANCE/LUMINANCE_ALPHA. Keep the browser's legacy WebGL mapping.
+#if defined(GL_RED) && (!defined(__EMSCRIPTEN__) || defined(DM_PLATFORM_WASMCART))
 #define DMGRAPHICS_TEXTURE_FORMAT_LUMINANCE                 (GL_RED)
 #else
 #define DMGRAPHICS_TEXTURE_FORMAT_LUMINANCE                 (GL_LUMINANCE)
 #endif
 
-#if defined(GL_RG) && !defined (__EMSCRIPTEN__)
+#if defined(GL_RG) && (!defined(__EMSCRIPTEN__) || defined(DM_PLATFORM_WASMCART))
 #define DMGRAPHICS_TEXTURE_FORMAT_LUMINANCE_ALPHA           (GL_RG)
 #else
 #define DMGRAPHICS_TEXTURE_FORMAT_LUMINANCE_ALPHA           (GL_LUMINANCE_ALPHA)
