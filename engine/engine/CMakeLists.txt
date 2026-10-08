@@ -278,6 +278,10 @@ set(ENGINE_COMMON_SOURCES
   "${ENGINE_SRC_DIR}/engine_loop.cpp"
   "${ENGINE_SRC_DIR}/extension.cpp"
   "${ENGINE_SRC_DIR}/script/script_engine.cpp")
+if(DEFOLD_WASMCART)
+  list(APPEND ENGINE_COMMON_SOURCES "${ENGINE_SRC_DIR}/wasmcart/script_wasmcart.cpp")
+  set(ENGINE_WASMCART_INCLUDE_DIRS "${DEFOLD_HOME}/engine/hid/src" "${DEFOLD_HOME}/engine/platform/src")
+endif()
 if(TARGET_PLATFORM MATCHES "^(wasm-web|wasm_pthread-web)$")
   list(APPEND ENGINE_COMMON_SOURCES "${ENGINE_SRC_DIR}/engine_web.cpp")
 elseif(TARGET_PLATFORM MATCHES "arm64-nx64")
@@ -301,6 +305,7 @@ defold_add_library(engine STATIC
   $<TARGET_OBJECTS:engine_ddf_generated>
   ${ENGINE_EMBED_CPP})
 target_include_directories(engine PUBLIC
+  ${ENGINE_WASMCART_INCLUDE_DIRS}
   "${ENGINE_SRC_DIR}"
   "${ENGINE_ROOT}"
   "${ENGINE_PROTO_DIR}"
@@ -329,6 +334,7 @@ target_link_libraries(engine PUBLIC engine_service)
 
 defold_add_library(engine_release STATIC ${ENGINE_COMMON_SOURCES} $<TARGET_OBJECTS:engine_ddf_generated>)
 target_include_directories(engine_release PUBLIC
+  ${ENGINE_WASMCART_INCLUDE_DIRS}
   "${ENGINE_SRC_DIR}"
   "${ENGINE_ROOT}"
   "${ENGINE_PROTO_DIR}"

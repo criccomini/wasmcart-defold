@@ -15,6 +15,7 @@
 
 #include <dmsdk/script/script.h>
 #include "../engine_private.h"
+#include "script_engine.h"
 
 extern "C"
 {
@@ -141,6 +142,9 @@ void ScriptSysEngineInitialize(lua_State* L, dmEngine::HEngine engine)
     luaL_register(L, "sys", EngineSys_methods);
 
     lua_pop(L, 1);
+#if defined(DM_PLATFORM_WASMCART)
+    ScriptWasmcartInitialize(L);
+#endif
     assert(top == lua_gettop(L));
 }
 

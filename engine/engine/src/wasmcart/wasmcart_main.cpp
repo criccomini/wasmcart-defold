@@ -157,16 +157,56 @@ __attribute__((import_module("env"), import_name("wc_text_input_begin")))
 extern "C" void wc_text_input_begin(void);
 __attribute__((import_module("env"), import_name("wc_text_input_end")))
 extern "C" void wc_text_input_end(void);
+__attribute__((import_module("env"), import_name("wc_pad_has_rumble")))
+extern "C" uint32_t wc_pad_has_rumble(uint32_t pad_id);
+__attribute__((import_module("env"), import_name("wc_pad_rumble")))
+extern "C" void wc_pad_rumble(uint32_t pad_id, float low, float high, uint32_t duration_ms);
+__attribute__((import_module("env"), import_name("wc_pad_rumble_stop")))
+extern "C" void wc_pad_rumble_stop(uint32_t pad_id);
 #else
 extern "C" void wc_log(const char* ptr, unsigned int len) { (void)ptr; (void)len; }
 extern "C" void wc_text_input_begin(void) {}
 extern "C" void wc_text_input_end(void) {}
+extern "C" uint32_t wc_pad_has_rumble(uint32_t pad_id) { (void)pad_id; return 0; }
+extern "C" void wc_pad_rumble(uint32_t pad_id, float low, float high, uint32_t duration_ms)
+{ (void)pad_id; (void)low; (void)high; (void)duration_ms; }
+extern "C" void wc_pad_rumble_stop(uint32_t pad_id) { (void)pad_id; }
 #endif
 
 #define WC_LOG(s) wc_log(s, sizeof(s) - 1)
 
 namespace dmPlatform
 {
+    bool WasmcartPadHasRumble(uint32_t index)
+    {
+        WasmcartPad pad;
+        if (!WasmcartGetPad(index, &pad) || !pad.m_Connected)
+        {
+            return false;
+        }
+        const uint32_t capability = wc_pad_has_rumble(index);
+        // Generic env stubs can return -1 (ENOSYS), which becomes UINT32_MAX.
+        return capability != 0 && capability != UINT32_MAX;
+    }
+
+    void WasmcartPadRumble(uint32_t index, float low, float high, uint32_t duration_ms)
+    {
+        // Older hosts stub unknown imports with zero or -1. Query first
+        // so those hosts, and devices without motors, never get a rumble call.
+        if (WasmcartPadHasRumble(index))
+        {
+            wc_pad_rumble(index, low, high, duration_ms > 5000 ? 5000 : duration_ms);
+        }
+    }
+
+    void WasmcartPadRumbleStop(uint32_t index)
+    {
+        if (WasmcartPadHasRumble(index))
+        {
+            wc_pad_rumble_stop(index);
+        }
+    }
+
     // Declared in platform_window_wasmcart.h; the window backend calls this
     // when the engine raises or lowers a text field.
     void WasmcartSetTextInput(bool enabled)
