@@ -130,16 +130,20 @@ namespace dmPlatform
     // persists that region across sessions). A cart has no filesystem, so
     // sys.save/sys.load route here instead of through fopen.
     //
-    // Capacities are fixed because the block is a flat byte region the host
-    // copies verbatim: nothing inside it may be a pointer, so there is no
-    // allocator and no growth. 8 files x 16 KB covers settings, progress and
-    // high scores, which is what sys.save exists for.
+    // The size is chosen before wc_get_info publishes the region, then fixed
+    // for the session. No pointers are stored inside the persisted block.
 #define WASMCART_SAVE_MAX_FILES 8
 #define WASMCART_SAVE_MAX_NAME  128
-#define WASMCART_SAVE_MAX_FILE  (16 * 1024)
+#define WASMCART_SAVE_DEFAULT_FILE (16 * 1024)
+#define WASMCART_SAVE_DEFAULT_SIZE (16 + WASMCART_SAVE_MAX_FILES * (WASMCART_SAVE_MAX_NAME + 4 + WASMCART_SAVE_DEFAULT_FILE))
+#define WASMCART_SAVE_MAX_SIZE (4 * 1024 * 1024)
 
+    // Clamps total bytes to [DEFAULT_SIZE, MAX_SIZE]. Allocate once, before
+    // host restore; subsequent calls keep the original region and capacity.
+    bool     WasmcartConfigureSave(int64_t size);
     void*    WasmcartGetSaveBlock();
     uint32_t WasmcartGetSaveBlockSize();
+    uint32_t WasmcartGetSaveMaxFileSize();
 
     bool WasmcartSaveWrite(const char* name, const void* data, uint32_t size);
     // Returns false when the name is not present. out_size always receives the

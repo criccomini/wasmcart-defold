@@ -24,12 +24,15 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
 #include "engine_version.h"
 
 #include "engine.h"
 #include "engine_private.h"
 #include <platform_window_wasmcart.h>
 #include <dlib/time.h>
+#include <dlib/configfile.h>
 
 extern "C" void dmExportedSymbols(); // Found in "__exported_symbols.cpp"
 
@@ -226,6 +229,54 @@ namespace dmPlatform
 // Cart exports
 // ---------------------------------------------------------------------------
 
+static void ConfigureSave()
+{
+    static bool configured = false;
+    if (configured)
+        return;
+    configured = true;
+
+    // Hosts restore saves before wc_init. Read the project through the asset
+    // imports now, so the first info block already has the final region.
+    // These are the same project paths dmEngine::GetProjectFile searches.
+    dmConfigFile::HConfig config = 0;
+    const char* paths[] = { "game.projectc", "build/default/game.projectc" };
+    for (uint32_t i = 0; i < sizeof(paths) / sizeof(paths[0]); ++i)
+    {
+        if (dmConfigFile::Load(paths[i], 0, 0, &config) == dmConfigFile::RESULT_OK)
+            break;
+    }
+
+    int64_t size = WASMCART_SAVE_DEFAULT_SIZE;
+    if (config)
+    {
+        const char* value = dmConfigFile::GetString(config, "wasmcart.save_size", 0);
+        if (value)
+        {
+            char* end = 0;
+            errno = 0;
+            int64_t parsed = strtoll(value, &end, 10);
+            // strtoll saturates on overflow; ConfigureSave clamps either end.
+            if (end != value && *end == 0 && (errno == 0 || errno == ERANGE))
+                size = parsed;
+            else
+                WC_LOG("wasmcart: invalid wasmcart.save_size; using default");
+        }
+        dmConfigFile::Delete(config);
+    }
+    else
+    {
+        WC_LOG("wasmcart: unable to read save configuration; using default");
+    }
+
+    if (!dmPlatform::WasmcartConfigureSave(size))
+        WC_LOG("wasmcart: save allocation failed; saving disabled");
+    char buf[160];
+    int n = snprintf(buf, sizeof(buf), "wasmcart: save_size=%u bytes, max_file_size=%u bytes, files=%u",
+        dmPlatform::WasmcartGetSaveBlockSize(), dmPlatform::WasmcartGetSaveMaxFileSize(), WASMCART_SAVE_MAX_FILES);
+    if (n > 0) wc_log(buf, (unsigned int)n);
+}
+
 extern "C"
 {
 
@@ -237,6 +288,7 @@ static void wasmcart_mark_resolution_resolved(void) { s_ResolutionResolved = tru
 __attribute__((export_name("wc_get_info")))
 wc_info_t* wc_get_info(void)
 {
+    ConfigureSave();
     // wc_get_info() must be IDEMPOTENT: a host may call it again after
     // wc_init() to pick up whatever the cart resolved, and some do. Resetting
     // the resolution here would throw away the host's own preferred size that
@@ -281,6 +333,7 @@ wc_info_t* wc_get_info(void)
 __attribute__((export_name("wc_init")))
 void wc_init(void)
 {
+    ConfigureSave();
     // Point the window backend at the host's input blocks before the engine
     // exists, so the first frame already sees real input.
     memset(&g_InputState, 0, sizeof(g_InputState));
