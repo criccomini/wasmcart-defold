@@ -116,6 +116,142 @@ migration script for pre-1.13 projects live in
 [wasmcart-defold-examples](https://github.com/wasmcart/wasmcart-defold-examples),
 which carries twelve carts including five complete games.
 
+## Loading content in parts
+
+Cart builds support `liveupdate.add_mount(name, "zip:parts/area1.zip", priority, cb)`.
+The path names a file inside the cart's assets directory. Use a relative path
+with directories intact; `zip://` introduces a URI host and is not supported.
+No download or writable filesystem is needed. Add mounts again each session.
+
+Previously the ZIP provider called `zip_open` through stdio, so it could not
+open cart assets. The cart ZIP backend now uses `wc_asset_size` and
+`wc_load_asset`. It owns one buffer per mounted ZIP and frees it on
+`liveupdate.remove_mount`, failed mounting, or engine shutdown. The ZIP reader
+borrows the buffer. The base `game.arcd` stays resident, as before.
+
+### Build and pack
+
+Follow Defold's [excluded collection proxy workflow](https://defold.com/manuals/live-update/).
+Keep the bootstrap collection, loader script and UI in the base game. Put each
+area behind a collection proxy and tick **Exclude**. A `.collectionproxy`
+file looks like this:
+
+```text
+collection: "/areas/area1.collection"
+exclude: true
+```
+
+Resources also referenced by boot content remain in `game.arcd`. Keep large
+textures and sounds out of boot atlases and other boot dependencies. A proxy
+that loads later but has Exclude off still puts its content in the base archive.
+
+In `game.project`, select a ZIP publisher:
+
+```ini
+[liveupdate]
+settings = /liveupdate.settings
+```
+
+Create `liveupdate.settings` in the game project:
+
+```ini
+[liveupdate]
+mode = Zip
+zip-filepath = build/liveupdate
+zip-filename = all.zip
+```
+
+Run these commands from the game project. `PORT` points to this port's checkout;
+`bob.jar` and `dmengine_wasmcart.wasm` must already be available. Use the runtime
+built from this change. Compile the base and the parts together on each build.
+
+```sh
+PORT=/path/to/wasmcart-defold
+java -jar bob.jar --root . --platform wasm-web --archive \
+    --use-uncompressed-lua-source --liveupdate yes build
+
+mkdir -p staged/parts
+cp build/default/game.arci build/default/game.arcd \
+    build/default/game.dmanifest build/default/game.projectc staged/
+python3 "$PORT/scripts/split_liveupdate.py" build/default/game.graph.json \
+    build/liveupdate/all.zip staged/parts \
+    area1=/areas/area1.collectionc area2=/areas/area2.collectionc
+
+wasmcart pack --wasm dmengine_wasmcart.wasm --assets staged \
+    --name "My Game" --width 960 --height 540 --output mygame.wasc
+```
+
+Bob publishes all excluded resources into one ZIP. The splitter walks each
+compiled collection's dependencies in `game.graph.json`. It keeps bob's resource
+headers, digest filenames and `liveupdate.game.dmanifest`. Shared excluded
+resources go in every part that needs them; base resources stay in the base.
+Give every part a distinct name. For one small part, copy `all.zip` to
+`staged/parts/area1.zip` instead. Do not put `all.zip` in staging as well as the
+split parts, or include the ZIPs as Defold custom resources.
+
+### Mount, load and unload
+
+For a proxy named `area1` on the loader's game object:
+
+```lua
+local function mounted(self, name, uri, result)
+    assert(result == liveupdate.LIVEUPDATE_OK, "mount failed: " .. uri)
+    msg.post("#area1", "async_load")
+end
+
+function init(self)
+    local result = liveupdate.add_mount("area1", "zip:parts/area1.zip", 10, mounted)
+    assert(result == liveupdate.LIVEUPDATE_OK) -- request accepted
+end
+
+function on_message(self, message_id, message, sender)
+    if message_id == hash("proxy_loaded") then
+        msg.post(sender, "init")
+        msg.post(sender, "enable")
+    elseif message_id == hash("leave_area1") then
+        msg.post("#area1", "disable")
+        msg.post("#area1", "final")
+        msg.post("#area1", "unload")
+    elseif message_id == hash("proxy_unloaded") then
+        assert(liveupdate.remove_mount("area1") == liveupdate.LIVEUPDATE_OK)
+    end
+end
+```
+
+Wait for the mount callback before loading the proxy. Wait for
+`proxy_unloaded` before removing its mount. Loaded textures and other resources
+have their own lifetimes; removing a mount frees the ZIP, not those resources.
+Release dynamic resource handles too. Shared resources still in use stay loaded.
+Use a distinct mount name for each live part. Larger priorities win resource
+lookups. A duplicate name fails and releases the new ZIP; it leaves the old
+mount intact. To revisit an area, add its mount and load its proxy again.
+
+Mounting reads a whole ZIP in one operation. The callback API does not make
+that read incremental: this cart build processes it on the main thread.
+On Couchmix, keep each ZIP loaded during play well below 150 MiB to avoid the
+2 s heartbeat timeout. Each asset must fit the 256 MiB cap. Budget the base
+archive, mounted ZIPs, loaded resources and temporary extraction buffers within
+the game's roughly 1 GiB limit. Mount only the current and upcoming parts;
+unload and unmount old ones.
+
+### Local checks
+
+```sh
+# From this checkout; no engine build or downloaded dependencies needed:
+bash scripts/test_cart_mounts.sh
+```
+
+The host test uses the real ZIP reader and mocked cart imports. It checks
+stored and deflated ZIPs, a bob Live Update ZIP, entry reads without reloading,
+independent buffers, repeated add/remove, duplicate names, missing assets,
+failed/short reads, allocation failure and corrupt ZIPs. It tracks owned buffer
+bytes and runs with address and undefined-behavior sanitizers. The script also
+checks C++ syntax and the splitter's dependency and manifest handling.
+
+These checks do not run the full resource provider, Lua callbacks, collection
+proxies or the wasm host. CI must build the runtime; a cart on Couchmix must
+verify proxy loads, unloads, memory and heartbeat timing.
+
 ## Save capacity
 
 `sys.save` and `sys.load` use the host's persistent save region. To raise its

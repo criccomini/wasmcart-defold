@@ -208,6 +208,10 @@ if(DEFOLD_WASMCART AND TARGET_PLATFORM_OS STREQUAL "web")
   # sys_web goes: it defines the same resource functions against JS glue.
   dlib_remove_matching(DLIB_SOURCES "/sys_web\\.cpp$")
   list(APPEND DLIB_SOURCES "${DLIB_CORE_DIR}/sys_wasmcart.cpp")
+  # Live Update ZIPs are cart assets too. Keep stdio for host tools and
+  # ordinary web builds, but retain an owned asset buffer in cart builds.
+  dlib_remove_matching(DLIB_SOURCES "/zip_default\\.cpp$")
+  list(APPEND DLIB_SOURCES "${DLIB_CORE_DIR}/zip_wasmcart.cpp")
 endif()
 
 dlib_remove_matching(DLIB_SOURCES "/image\\.cpp$" "/image_null\\.cpp$")
