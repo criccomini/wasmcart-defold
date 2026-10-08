@@ -161,6 +161,8 @@ namespace dmLiveUpdate
             if (dmResource::RESULT_OK != result)
             {
                 dmLogError("Failed to add mount for '%s': %s", job->m_Uri, dmResource::ResultToString(result));
+                dmResourceProvider::Unmount(archive);
+                return ResourceResultToLiveupdateResult(result);
             }
         }
 
