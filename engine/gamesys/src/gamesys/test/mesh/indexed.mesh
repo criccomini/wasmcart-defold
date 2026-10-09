@@ -1,0 +1,3 @@
+material: "/mesh/mesh.material"
+vertices: "/mesh/indexed-vertices.buffer"
+primitive_type: PRIMITIVE_TRIANGLES

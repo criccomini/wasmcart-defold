@@ -326,6 +326,69 @@ Absent or invalid numeric gamepad indices return false from
 and hosts that stub missing imports with zero or -1 behave the same way.
 Invalid strengths or durations raise a Lua argument error.
 
+## Indexed meshes
+
+The `indexed-mesh` branch adds a runtime `indices` property to mesh components.
+It uses the existing buffer resource type. Upstream bob 1.13.2 can compile the
+content; no mesh descriptor or proto changes are required.
+
+```lua
+local b = buffer.create(6, {{name = hash("index"), type = buffer.VALUE_TYPE_UINT16, count = 1}})
+local stream = buffer.get_stream(b, "index")
+local data = {0, 1, 2, 0, 2, 3} -- four vertices, two triangles; zero-based indices
+for i, value in ipairs(data) do stream[i] = value end
+local indices = resource.create_buffer("/runtime-indices.bufferc", {buffer = b})
+go.set("#mesh", "indices", indices)
+-- The component holds its own resource reference after this release.
+resource.release(indices)
+```
+
+The material must use local vertex space. The index buffer must have one
+scalar uint16 or uint32 stream. The stream name is unrestricted. The adapter
+must support the type, and every index must be below the vertex count.
+The draw uses the index count and a zero byte offset. Non-indexed components
+keep DrawArrays; world-space batching keeps its original path.
+
+`go.get("#mesh", "indices")` returns the buffer resource hash, or `hash("")`
+when unset. Older engines report an unknown property; use `pcall(go.get, url,
+"indices")` to check support. Clear with `go.set(url, "indices", hash(""))`.
+If you switched to unique vertices, restore the expanded vertices before
+resuming a triangle-list draw.
+
+Invalid assignments leave the old property intact. Buffer edits and
+`resource.set_buffer` replacements trigger validation and upload. Invalid
+edited data suppresses drawing until repaired. Empty index buffers draw
+nothing. Each component owns its GPU index buffer and holds the resource
+reference until clear, replacement or destruction. Vertex buffers still share
+the local-space resource cache. Material/resource reloads retain the actual
+vertex-buffer reference and refuse indexed world-space rendering.
+
+The GLES3 adapter now reports core uint32 index support without requiring an
+extension string. Leave the all-ones index unused in WebGL2 content because
+that backend reserves it for primitive restart.
+
+The host helper test uses real dmBuffer storage and ASan/UBSan. It requires an
+existing C++ compiler, protoc and Python environment with protobuf:
+
+```bash
+python3 scripts/test_mesh_indices_host.py
+```
+
+It checks both widths, bounds, invalid layouts, unchanged versions, edits,
+replacement handles, empty buffers and shared vertex-buffer ownership.
+`IndexedMeshTest` in `test_gamesys.cpp` checks property assignment, null-adapter
+draw objects, uploaded bytes, mutation, clearing and world-space rejection.
+That integration fixture still needs a configured engine test build:
+
+```bash
+cmake --build engine/build/arm64-macos --target run_test_gamesys
+```
+
+The CI wasm runtime and Pi DrawElements path remain unverified until review
+and the runtime build. The Stackrobats opt-in export reduces Bo from 29,628
+vertices to 5,199 and Momo from 28,308 to 5,371. Triangle counts stay unchanged.
+These are buffer counts, not measured shader invocations or Pi performance.
+
 ## WebGPU carts
 
 The same build also produces a WebGPU cart (`wc_info_t.gpu_api = 2`) from

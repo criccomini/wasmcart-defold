@@ -1,2 +1,12 @@
 /mesh/no_data.mesh
 /mesh/test_comp.go
+
+/mesh/indexed.go
+/mesh/mesh-world.material
+/mesh/indices16.buffer
+/mesh/indices32.buffer
+/mesh/indices-oob.buffer
+/mesh/indices-float.buffer
+/mesh/indices-vector.buffer
+/mesh/indices-signed.buffer
+/mesh/indices-multiple.buffer

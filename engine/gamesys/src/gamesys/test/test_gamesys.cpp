@@ -27,6 +27,7 @@
 #include <platform/window.hpp>
 
 #include "gamesys/resources/res_compute.h"
+#include "gamesys/resources/res_buffer.h"
 #include "gamesys/resources/res_font.h"
 #include "gamesys/resources/res_font_private.h"
 #include "gamesys/resources/res_glyph_bank.h"
@@ -7864,6 +7865,165 @@ INSTANTIATE_TEST_CASE_P(Buffer, ResourceTest, jc_test_values_in(valid_buffer_res
 
 const char* valid_mesh_resources[] = {"/mesh/no_data.meshc", "/mesh/triangle.meshc"};
 INSTANTIATE_TEST_CASE_P(Mesh, ResourceTest, jc_test_values_in(valid_mesh_resources));
+
+// These tests inspect the render objects and null-adapter buffer bytes, rather
+// than only checking that go.set accepts the runtime property.
+class IndexedMeshTest : public GamesysTest<int>
+{
+public:
+    IndexedMeshTest() { SetContentFolder("mesh"); }
+
+    void DrawMesh()
+    {
+        ASSERT_TRUE(dmGameObject::Update(m_Collection, &m_UpdateContext));
+        ASSERT_TRUE(dmGameObject::PostUpdate(m_Collection));
+        dmRender::RenderListBegin(m_RenderContext);
+        ASSERT_TRUE(dmGameObject::Render(m_Collection));
+        dmRender::RenderListEnd(m_RenderContext);
+        dmRender::DrawRenderList(m_RenderContext, 0, 0, 0, dmRender::SORT_BACK_TO_FRONT);
+    }
+
+    dmRender::RenderContext* RenderContext() { return (dmRender::RenderContext*)m_RenderContext; }
+};
+
+TEST_F(IndexedMeshTest, DrawReplaceMutateAndClear)
+{
+    ASSERT_TRUE(dmGameObject::Init(m_Collection));
+    dmGameObject::HInstance go = Spawn(m_Factory, m_Collection, "/mesh/indexed.goc", dmHashString64("/indexed"));
+    ASSERT_NE((void*)0, go);
+    dmhash_t mesh = dmHashString64("mesh"), indices = dmHashString64("indices");
+    ASSERT_EQ((dmhash_t)0, GetHashProperty(go, mesh, indices));
+    DrawMesh();
+    ASSERT_EQ(1u, RenderContext()->m_RenderObjects.Size());
+    ASSERT_EQ((dmGraphics::HIndexBuffer)0, RenderContext()->m_RenderObjects[0]->m_IndexBuffer);
+    ASSERT_EQ(4u, RenderContext()->m_RenderObjects[0]->m_VertexCount);
+
+    dmGameSystem::BufferResource* br16 = 0;
+    dmGameSystem::BufferResource* br32 = 0;
+    ASSERT_EQ(dmResource::RESULT_OK, dmResource::Get(m_Factory, "/mesh/indices16.bufferc", (void**)&br16));
+    ASSERT_EQ(dmResource::RESULT_OK, dmResource::Get(m_Factory, "/mesh/indices32.bufferc", (void**)&br32));
+    ASSERT_EQ(dmGameObject::PROPERTY_RESULT_OK, SetHashProperty(go, mesh, indices, br16->m_NameHash));
+    ASSERT_EQ(br16->m_NameHash, GetHashProperty(go, mesh, indices));
+    DrawMesh();
+    ASSERT_EQ(1u, RenderContext()->m_RenderObjects.Size());
+    dmRender::RenderObject* ro = RenderContext()->m_RenderObjects[0];
+    ASSERT_NE((dmGraphics::HIndexBuffer)0, ro->m_IndexBuffer);
+    ASSERT_EQ(dmGraphics::TYPE_UNSIGNED_SHORT, ro->m_IndexType);
+    ASSERT_EQ(6u, ro->m_VertexCount);
+    ASSERT_EQ(0u, ro->m_VertexStart);
+    ASSERT_EQ(12u, dmGraphics::GetIndexBufferSize(ro->m_IndexBuffer));
+    const uint16_t expected[] = {0,1,2,0,2,3};
+    ASSERT_EQ(0, memcmp(((dmGraphics::IndexBuffer*)ro->m_IndexBuffer)->m_Buffer, expected, sizeof(expected)));
+    dmGraphics::HIndexBuffer gpu = ro->m_IndexBuffer;
+
+    uint16_t* stream = 0;
+    uint32_t count, components, stride;
+    ASSERT_EQ(dmBuffer::RESULT_OK, dmBuffer::GetStream(br16->m_Buffer, dmHashString64("index"), (void**)&stream, &count, &components, &stride));
+    stream[0] = 3;
+    ASSERT_EQ(dmBuffer::RESULT_OK, dmBuffer::UpdateContentVersion(br16->m_Buffer));
+    DrawMesh();
+    ro = RenderContext()->m_RenderObjects[0];
+    ASSERT_EQ(gpu, ro->m_IndexBuffer);
+    ASSERT_EQ(3u, ((uint16_t*)((dmGraphics::IndexBuffer*)gpu)->m_Buffer)[0]);
+
+    // A bad edit suppresses the draw. Repairing the same buffer resumes it.
+    stream[0] = 4;
+    ASSERT_EQ(dmBuffer::RESULT_OK, dmBuffer::UpdateContentVersion(br16->m_Buffer));
+    DrawMesh();
+    ASSERT_EQ(0u, RenderContext()->m_RenderObjects.Size());
+    stream[0] = 0;
+    ASSERT_EQ(dmBuffer::RESULT_OK, dmBuffer::UpdateContentVersion(br16->m_Buffer));
+    DrawMesh();
+    ASSERT_EQ(1u, RenderContext()->m_RenderObjects.Size());
+
+    ASSERT_EQ(dmGameObject::PROPERTY_RESULT_OK, SetHashProperty(go, mesh, indices, br32->m_NameHash));
+    DrawMesh();
+    ro = RenderContext()->m_RenderObjects[0];
+    ASSERT_EQ(dmGraphics::TYPE_UNSIGNED_INT, ro->m_IndexType);
+    ASSERT_EQ(24u, dmGraphics::GetIndexBufferSize(ro->m_IndexBuffer));
+    const uint32_t expected32[] = {0,1,2,0,2,3};
+    ASSERT_EQ(0, memcmp(((dmGraphics::IndexBuffer*)ro->m_IndexBuffer)->m_Buffer, expected32, sizeof(expected32)));
+
+    // Mirror resource.set_buffer: a new handle can have the same content version.
+    dmBuffer::StreamDeclaration declaration = {dmHashString64("replacement"), dmBuffer::VALUE_TYPE_UINT16, 1};
+    dmBuffer::HBuffer replacement;
+    ASSERT_EQ(dmBuffer::RESULT_OK, dmBuffer::Create(3, &declaration, 1, &replacement));
+    ASSERT_EQ(dmBuffer::RESULT_OK, dmBuffer::GetStream(replacement, declaration.m_Name, (void**)&stream, &count, &components, &stride));
+    stream[0] = 0; stream[1] = 1; stream[2] = 2;
+    dmBuffer::Destroy(br32->m_Buffer);
+    br32->m_Buffer = replacement;
+    br32->m_ElementCount = 3;
+    br32->m_Stride = 2;
+    DrawMesh();
+    ro = RenderContext()->m_RenderObjects[0];
+    ASSERT_EQ(dmGraphics::TYPE_UNSIGNED_SHORT, ro->m_IndexType);
+    ASSERT_EQ(3u, ro->m_VertexCount);
+    ASSERT_EQ(6u, dmGraphics::GetIndexBufferSize(ro->m_IndexBuffer));
+
+    // Changing the vertex resource can invalidate an otherwise unchanged index buffer.
+    stream[2] = 3;
+    ASSERT_EQ(dmBuffer::RESULT_OK, dmBuffer::UpdateContentVersion(replacement));
+    dmGameSystem::BufferResource* smaller = 0;
+    ASSERT_EQ(dmResource::RESULT_OK, dmResource::Get(m_Factory, "/mesh/triangle.bufferc", (void**)&smaller));
+    ASSERT_EQ(dmGameObject::PROPERTY_RESULT_OK, SetHashProperty(go, mesh, dmHashString64("vertices"), smaller->m_NameHash));
+    DrawMesh();
+    ASSERT_EQ(0u, RenderContext()->m_RenderObjects.Size());
+    dmGameSystem::BufferResource* vertices = 0;
+    ASSERT_EQ(dmResource::RESULT_OK, dmResource::Get(m_Factory, "/mesh/indexed-vertices.bufferc", (void**)&vertices));
+    ASSERT_EQ(dmGameObject::PROPERTY_RESULT_OK, SetHashProperty(go, mesh, dmHashString64("vertices"), vertices->m_NameHash));
+    DrawMesh();
+    ASSERT_EQ(1u, RenderContext()->m_RenderObjects.Size());
+
+    ASSERT_EQ(dmGameObject::PROPERTY_RESULT_OK, SetHashProperty(go, mesh, indices, 0));
+    ASSERT_EQ((dmhash_t)0, GetHashProperty(go, mesh, indices));
+    DrawMesh();
+    ASSERT_EQ((dmGraphics::HIndexBuffer)0, RenderContext()->m_RenderObjects[0]->m_IndexBuffer);
+    ASSERT_EQ(4u, RenderContext()->m_RenderObjects[0]->m_VertexCount);
+    dmResource::Release(m_Factory, vertices);
+    dmResource::Release(m_Factory, smaller);
+    dmResource::Release(m_Factory, br32);
+    dmResource::Release(m_Factory, br16);
+    ASSERT_TRUE(dmGameObject::Final(m_Collection));
+}
+
+TEST_F(IndexedMeshTest, RejectBadBuffersAndWorldSpace)
+{
+    ASSERT_TRUE(dmGameObject::Init(m_Collection));
+    dmGameObject::HInstance go = Spawn(m_Factory, m_Collection, "/mesh/indexed.goc", dmHashString64("/indexed"));
+    ASSERT_NE((void*)0, go);
+    dmhash_t mesh = dmHashString64("mesh"), indices = dmHashString64("indices");
+    dmGameSystem::BufferResource* valid = 0;
+    ASSERT_EQ(dmResource::RESULT_OK, dmResource::Get(m_Factory, "/mesh/indices16.bufferc", (void**)&valid));
+    ASSERT_EQ(dmGameObject::PROPERTY_RESULT_OK, SetHashProperty(go, mesh, indices, valid->m_NameHash));
+    const char* invalid[] = {"/mesh/indices-oob.bufferc", "/mesh/indices-float.bufferc", "/mesh/indices-vector.bufferc", "/mesh/indices-signed.bufferc", "/mesh/indices-multiple.bufferc"};
+    for (uint32_t i = 0; i < sizeof(invalid)/sizeof(invalid[0]); ++i)
+    {
+        dmGameSystem::BufferResource* bad = 0;
+        ASSERT_EQ(dmResource::RESULT_OK, dmResource::Get(m_Factory, invalid[i], (void**)&bad));
+        ASSERT_EQ(dmGameObject::PROPERTY_RESULT_UNSUPPORTED_VALUE, SetHashProperty(go, mesh, indices, bad->m_NameHash));
+        ASSERT_EQ(valid->m_NameHash, GetHashProperty(go, mesh, indices));
+        dmResource::Release(m_Factory, bad);
+    }
+    dmGameObject::PropertyOptions options;
+    ASSERT_EQ(dmGameObject::PROPERTY_RESULT_TYPE_MISMATCH, dmGameObject::SetProperty(go, mesh, indices, options, dmGameObject::PropertyVar(1.0f)));
+    dmGameSystem::MaterialResource* world = 0;
+    ASSERT_EQ(dmResource::RESULT_OK, dmResource::Get(m_Factory, "/mesh/mesh-world.materialc", (void**)&world));
+    dmhash_t world_hash;
+    ASSERT_EQ(dmResource::RESULT_OK, dmResource::GetPath(m_Factory, world, &world_hash));
+    dmhash_t original = GetHashProperty(go, mesh, dmHashString64("material"));
+    ASSERT_EQ(dmGameObject::PROPERTY_RESULT_UNSUPPORTED_VALUE, SetHashProperty(go, mesh, dmHashString64("material"), world_hash));
+    ASSERT_EQ(original, GetHashProperty(go, mesh, dmHashString64("material")));
+    ASSERT_EQ(dmGameObject::PROPERTY_RESULT_OK, SetHashProperty(go, mesh, indices, 0));
+    ASSERT_EQ(dmGameObject::PROPERTY_RESULT_OK, SetHashProperty(go, mesh, dmHashString64("material"), world_hash));
+    ASSERT_EQ(dmGameObject::PROPERTY_RESULT_UNSUPPORTED_VALUE, SetHashProperty(go, mesh, indices, valid->m_NameHash));
+    ASSERT_EQ((dmhash_t)0, GetHashProperty(go, mesh, indices));
+    DrawMesh();
+    ASSERT_EQ(1u, RenderContext()->m_RenderObjects.Size());
+    ASSERT_EQ((dmGraphics::HIndexBuffer)0, RenderContext()->m_RenderObjects[0]->m_IndexBuffer);
+    dmResource::Release(m_Factory, world);
+    dmResource::Release(m_Factory, valid);
+    ASSERT_TRUE(dmGameObject::Final(m_Collection));
+}
 
 /* MeshSet */
 
