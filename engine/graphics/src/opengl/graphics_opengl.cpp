@@ -1940,7 +1940,7 @@ static void LogFrameBufferError(GLenum status)
         }
 
 #if defined(__ANDROID__) || defined(__arm__) || defined(__arm64__) || defined(__EMSCRIPTEN__) || defined(DM_GRAPHICS_USE_OPENGLES)
-        if (OpenGLIsExtensionSupported(_context, "GL_OES_element_index_uint") ||
+        if (context->m_IsGles3Version || OpenGLIsExtensionSupported(_context, "GL_OES_element_index_uint") ||
             OpenGLIsExtensionSupported(_context, "OES_element_index_uint"))
         {
             context->m_IndexBufferFormatSupport |= 1 << INDEXBUFFER_FORMAT_32;
