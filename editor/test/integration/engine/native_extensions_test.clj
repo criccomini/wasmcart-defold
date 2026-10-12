@@ -32,7 +32,12 @@
            [java.nio.charset StandardCharsets]))
 
 (defn fix-engine-sha1 [f]
-  (let [engine-sha1 (or (repo/detect-engine-sha1) EngineVersion/sha1)]
+  ;; The hosted extender cannot build an unpublished fork SDK. CI may select a
+  ;; published SDK for these integration tests without changing the editor's
+  ;; engine version or the engine artifacts built from this checkout.
+  (let [engine-sha1 (or (not-empty (System/getenv "DEFOLD_TEST_EXTENDER_ENGINE_SHA1"))
+                        (repo/detect-engine-sha1)
+                        EngineVersion/sha1)]
     (with-redefs [editor.system/defold-engine-sha1 (constantly engine-sha1)]
       (f))))
 

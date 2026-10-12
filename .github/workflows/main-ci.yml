@@ -716,6 +716,21 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libglw1-mesa-dev freeglut3-dev
       - *step_download_dynamo_home
       - *step_chmod_dynamo_home
+      - name: "Select published SDK for hosted extension tests"
+        if: env.OPTION_EDITOR_LOCAL != ''
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json
+          import re
+          import urllib.request
+
+          with urllib.request.urlopen("https://d.defold.com/stable/info.json", timeout=30) as response:
+              sha1 = json.load(response)["sha1"]
+          if not isinstance(sha1, str) or re.fullmatch(r"[0-9a-f]{40}", sha1) is None:
+              raise ValueError("Published Defold SDK metadata must contain a SHA-1")
+          print(f"DEFOLD_TEST_EXTENDER_ENGINE_SHA1={sha1}")
+          PY
       - name: "Test editor"
         run: "ci/ci.sh test-editor --platform=x86_64-linux ${{ env.OPTION_EDITOR_LOCAL }}"
       - *step_remove_bob_maven
