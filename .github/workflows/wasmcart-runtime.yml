@@ -12,7 +12,7 @@ name: wasmcart runtime
 # CI change without rebuilding on every push.
 on:
   push:
-    branches: [main]
+    branches: [main, couchmix]
     paths:
       - 'engine/**'
       - 'ext/**'

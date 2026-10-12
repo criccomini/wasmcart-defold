@@ -57,13 +57,13 @@ env:
   # Shared by the Android SDK setup and the emulator the x86_64-android tests run on
   ANDROID_API_LEVEL: "36"
   DM_BOB_JAR: ${{ github.workspace }}/com.dynamo.cr/com.dynamo.cr.bob/dist/bob.jar
-  OPTION_CODESIGN: ${{ !(startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/')) && github.event.client_payload.skip_sign != true && github.event.client_payload.skip_sign != 'true' && '--codesign' || '' }}
-  # A contrib build has no S3 credentials: it hands its output to the jobs downstream as
-  # GitHub Actions artifacts instead of archiving it, and builds the editor and bob from
+  OPTION_CODESIGN: ${{ !(github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/')) && github.event.client_payload.skip_sign != true && github.event.client_payload.skip_sign != 'true' && '--codesign' || '' }}
+  # Forks and contrib builds use GitHub Actions artifacts rather than upstream S3.
+  # They pass engine output to downstream jobs and build the editor and bob from
   # $DYNAMO_HOME rather than from the archive.
-  OPTION_ARCHIVE: ${{ !(startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/')) && '--archive' || '' }}
-  OPTION_SKIP_ARCHIVE: ${{ (startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/')) && '--skip-archive' || '' }}
-  OPTION_EDITOR_LOCAL: ${{ (startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/')) && '--engine-artifacts=dynamo-home --skip-distclean' || '' }}
+  OPTION_ARCHIVE: ${{ !(github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/')) && '--archive' || '' }}
+  OPTION_SKIP_ARCHIVE: ${{ (github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/')) && '--skip-archive' || '' }}
+  OPTION_EDITOR_LOCAL: ${{ (github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/')) && '--engine-artifacts=dynamo-home --skip-distclean' || '' }}
 
 jobs:
   # Steps and conditions that several jobs share are written once, with a YAML anchor
@@ -329,9 +329,9 @@ jobs:
         if: "!matrix.emulator"
         run: 'ci/ci.sh engine --platform=${{ matrix.platform }} ${{ env.OPTION_ARCHIVE }} ${{ matrix.engine_args }}${{ matrix.codesign && format('' {0}'', env.OPTION_CODESIGN) || '''' }}${{ matrix.gcloud && format('' --gcloud-service-key="{0}"'', env.GCLOUD_EDITOR_SERVICE_KEY) || '''' }}'
       - name: "Upload engine build for the jobs downstream"
-        # A contrib build has no S3 credentials, so bob and the editor pick the engine
-        # up from here instead of from the archive. See pr-ok-to-test.yml.
-        if: (startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
+        # Forks and contrib builds pass the engine to bob and the editor through
+        # these artifacts instead of the archive. See pr-ok-to-test.yml.
+        if: (github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: "dynamo-home-${{ matrix.platform }}"
@@ -342,7 +342,7 @@ jobs:
           if-no-files-found: "error"
           retention-days: 1
       - name: "Upload docs and builtins for the editor jobs"
-        if: matrix.docs && (startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
+        if: matrix.docs && (github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: "engine-share"
@@ -468,7 +468,7 @@ jobs:
       - name: "Download engine builds"
         # Without S3 credentials build_bob falls back to the artifacts in $DYNAMO_HOME,
         # so every engine build has to be restored there first.
-        if: (startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
+        if: (github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: "dynamo-home-*"
@@ -479,7 +479,7 @@ jobs:
         # actions/upload-artifact does not preserve file permissions, so the binaries come
         # back unexecutable. bob copies them into libexec/ and the editor packs them into
         # its bundle, where they have to be runnable.
-        if: (startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
+        if: (github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
         shell: bash
         run: "chmod -R +x tmp/dynamo_home/bin"
       - name: "Build bob"
@@ -526,9 +526,9 @@ jobs:
   build-sdk:
     needs: [bld-eng]
     runs-on: ubuntu-22.04
-    # The SDK is merged from the per-platform SDK archives on S3. A contrib build never
-    # writes them, so there is nothing to merge.
-    if: ((github.event_name != 'repository_dispatch') || ((github.event_name == 'repository_dispatch') && (github.event.client_payload.skip_sdk != true))) && !(startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
+    # The SDK is merged from per-platform archives on upstream S3. Forks and
+    # contrib builds do not write those archives, so there is nothing to merge.
+    if: ((github.event_name != 'repository_dispatch') || ((github.event_name == 'repository_dispatch') && (github.event.client_payload.skip_sdk != true))) && !(github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
     timeout-minutes: 10
     steps:
       - *step_checkout
@@ -654,17 +654,17 @@ jobs:
           path: "releasenotes"
       - &step_download_dynamo_home
         name: "Download engine build"
-        # A contrib build has no S3 credentials, so the editor is packed from the engine
+        # Forks and contrib builds pack the editor from the engine
         # binaries in $DYNAMO_HOME (--engine-artifacts=dynamo-home) rather than from the
         # archive, and --skip-distclean keeps them from being wiped.
-        if: (startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
+        if: (github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: "dynamo-home-${{ matrix.platform || 'x86_64-linux' }}"
           path: "tmp/dynamo_home"
       - *step_chmod_dynamo_home
       - name: "Download docs and builtins"
-        if: (startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/')) && runner.os != 'Linux'
+        if: (github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/')) && runner.os != 'Linux'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: "engine-share"
@@ -679,10 +679,10 @@ jobs:
         if: runner.os == 'Windows'
         run: 'ci/ci.sh build-editor --skip-tests ${{ env.OPTION_CODESIGN }} ${{ env.OPTION_EDITOR_LOCAL }} --platform=${{ matrix.platform }} --gcloud-service-key="${{env.GCLOUD_EDITOR_SERVICE_KEY}}"'
       - name: "Archive editor"
-        if: "!(startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))"
+        if: "!(github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))"
         run: "ci/ci.sh archive-editor --skip-install-ext --platform=${{ matrix.platform }}"
       - name: "Upload editor"
-        if: (startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
+        if: (github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: "editor-${{ matrix.platform }}"
@@ -698,10 +698,10 @@ jobs:
   test-editor-linux:
     needs: [build-bob, build-sdk]
     runs-on: ubuntu-22.04
-    # build-sdk is skipped for a contrib build, which would skip this job as well. Every
-    # other reason for build-sdk not succeeding - including a skip_sdk dispatch - still
-    # skips this job, as it did before.
-    if: ${{ !cancelled() && needs.build-bob.result == 'success' && (needs.build-sdk.result == 'success' || (startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))) && ((github.event_name != 'repository_dispatch') || ((github.event_name == 'repository_dispatch') && (github.event.client_payload.skip_editor != true))) }}
+    # build-sdk is skipped for forks and contrib builds; their editor tests use
+    # the engine artifacts instead. Other SDK failures or a skip_sdk dispatch
+    # still skip this job, as they did before.
+    if: ${{ !cancelled() && needs.build-bob.result == 'success' && (needs.build-sdk.result == 'success' || (github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))) && ((github.event_name != 'repository_dispatch') || ((github.event_name == 'repository_dispatch') && (github.event.client_payload.skip_editor != true))) }}
     timeout-minutes: 60
     steps:
       - *step_checkout
@@ -722,9 +722,9 @@ jobs:
   release:
     needs: [build-editor, test-editor-linux, test-bob]
     runs-on: ubuntu-22.04
-    # ci.py already refuses to release a branch other than master/beta/dev, but a contrib
-    # branch must not even reach the release job.
-    if: "!(startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))"
+    # Upstream releases require S3 artifacts. Forks publish through their own workflows;
+    # contrib branches must not reach this job either.
+    if: "!(github.repository != 'defold/defold' || startsWith(github.ref, 'refs/heads/contrib/') || startsWith(github.event.client_payload.branch, 'contrib/') || startsWith(github.head_ref, 'contrib/'))"
     permissions:
       contents: write
     steps:
