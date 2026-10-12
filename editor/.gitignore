@@ -8,6 +8,7 @@ pom.xml.asc
 /.m2
 /.openjfx
 /.lein-*
+!/.lein-classpath
 /.nrepl-port
 /doc/api
 /bin/
