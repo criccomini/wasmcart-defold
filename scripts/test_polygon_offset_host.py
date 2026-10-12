@@ -34,6 +34,10 @@ def main():
     declarations = header[header.index("    enum CommandType"):header.index("    void ParseCommands")]
     constructors = command[command.index("    Command::Command("):command.index("    void ParseCommands(")]
     polygon_case = command[command.index("                case COMMAND_TYPE_SET_POLYGON_OFFSET:"):command.index("                case COMMAND_TYPE_DRAW:")]
+    integration = function((ROOT / "engine/render/src/test/test_render_script.cpp").read_text(),
+                           "TEST_F(dmRenderScriptTest, TestSetPolygonOffsetFractionalAndNegative)")
+    literal_start = integration.index("const char* script =") + len("const char* script =")
+    integration_script = integration[literal_start:integration.index(";", literal_start)].strip()
     harness = r'''
 #include <cassert>
 #include <cstdint>
@@ -61,9 +65,10 @@ DECLARATIONS
 CONSTRUCTORS
     struct CommandBuffer {
         std::vector<Command> commands;
+        unsigned capacity = 1;
         bool Full() const { return commands.size() == Capacity(); }
         void Push(const Command& command) { commands.push_back(command); }
-        unsigned Capacity() const { return 1; }
+        unsigned Capacity() const { return capacity; }
     };
     struct RenderScriptInstance { CommandBuffer m_CommandBuffer; };
     static RenderScriptInstance instance;
@@ -131,8 +136,34 @@ int main() {
     assert(lua_pcall(L, 2, 0, 0) != 0);
     lua_pop(L, 1);
     assert(dmRender::instance.m_CommandBuffer.commands.empty());
+
+    // Execute the engine regression's actual Lua source as well. A native
+    // Lua value retains its sign even on runtimes that fold -0.0 literals.
+    dmRender::instance.m_CommandBuffer.capacity = 4;
+    lua_newtable(L);
+    lua_pushcfunction(L, dmRender::RenderScript_SetPolygonOffset);
+    lua_setfield(L, -2, "set_polygon_offset");
+    lua_setglobal(L, "render");
+    lua_pushnumber(L, -0.0);
+    lua_setglobal(L, "polygon_offset_negative_zero");
+    assert(luaL_dostring(L, INTEGRATION_SCRIPT) == 0);
+    lua_getglobal(L, "update");
+    lua_newtable(L);
+    assert(lua_pcall(L, 1, 0, 0) == 0);
+    assert(dmRender::instance.m_CommandBuffer.commands.size() == 4);
+    const float parsed_offsets[][2] = {
+        {0.125f, -0.75f}, {-1.25f, -2.5f}, {-1.0f, -4.0f}, {0.0f, -0.0f}
+    };
+    for (unsigned i = 0; i < 4; ++i) {
+        dmRender::Command* command = &dmRender::instance.m_CommandBuffer.commands[i];
+        assert(command->m_Operands[0] == Bits(parsed_offsets[i][0]));
+        assert(command->m_Operands[1] == Bits(parsed_offsets[i][1]));
+        dmRender::ParsePolygonOffset(command);
+        assert(Bits(dmGraphics::received_factor) == Bits(parsed_offsets[i][0]));
+        assert(Bits(dmGraphics::received_units) == Bits(parsed_offsets[i][1]));
+    }
     lua_close(L);
-    puts("polygon offset: 11 exact Lua/command/backend round trips and error paths passed");
+    puts("polygon offset: 11 API round trips, 4 parsed engine cases and error paths passed");
 }
 '''
     replacements = {
@@ -141,6 +172,7 @@ int main() {
         "INSERT_COMMAND": function(script, "bool InsertCommand(RenderScriptInstance* i, const Command& command)"),
         "BINDING": function(script, "int RenderScript_SetPolygonOffset(lua_State* L)"),
         "POLYGON_CASE": polygon_case,
+        "INTEGRATION_SCRIPT": integration_script,
     }
     for marker, source in replacements.items():
         harness = harness.replace(marker, source)

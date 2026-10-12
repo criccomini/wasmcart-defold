@@ -519,12 +519,18 @@ TEST_F(dmRenderScriptTest, TestLuaState)
 
 TEST_F(dmRenderScriptTest, TestSetPolygonOffsetFractionalAndNegative)
 {
+    // LuaJIT can normalize a -0.0 source literal to positive zero. Supply the
+    // signed value through the Lua API so this checks command serialization,
+    // independently of the parser's numeric-constant representation.
+    lua_State* L = m_Context->m_RenderScriptContext.m_LuaState;
+    lua_pushnumber(L, -0.0);
+    lua_setglobal(L, "polygon_offset_negative_zero");
     const char* script =
     "function update(self)\n"
     "    render.set_polygon_offset(0.125, -0.75)\n"
     "    render.set_polygon_offset(-1.25, -2.5)\n"
     "    render.set_polygon_offset(-1, -4)\n"
-    "    render.set_polygon_offset(0, -0.0)\n"
+    "    render.set_polygon_offset(0, polygon_offset_negative_zero)\n"
     "end\n";
     dmRender::HRenderScript render_script = dmRender::NewRenderScript(m_Context, LuaSourceFromString(script));
     dmRender::HRenderScriptInstance render_script_instance = dmRender::NewRenderScriptInstance(m_Context, render_script);
@@ -548,6 +554,8 @@ TEST_F(dmRenderScriptTest, TestSetPolygonOffsetFractionalAndNegative)
 
     dmRender::DeleteRenderScriptInstance(render_script_instance);
     dmRender::DeleteRenderScript(m_Context, render_script);
+    lua_pushnil(L);
+    lua_setglobal(L, "polygon_offset_negative_zero");
 }
 
 TEST_F(dmRenderScriptTest, TestSetBlendFuncSeparate)

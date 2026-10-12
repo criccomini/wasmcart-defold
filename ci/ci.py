@@ -267,6 +267,14 @@ def build_engine(channel, platform, args):
                     'x86_64-android'):
         install_sdk = ''
 
+    # Forks do not have upstream's SDK archive URL. Windows runners already
+    # provide Visual Studio and the Windows SDK; check_sdk discovers and
+    # validates those when no packaged SDK was installed. Keep using the
+    # packaged toolchain when its URL is configured.
+    if platform == 'x86_64-win32' and not os.environ.get('DM_PACKAGES_URL', '').strip():
+        print("No SDK package URL configured; using the installed Windows SDK and Visual Studio")
+        install_sdk = ''
+
     cmd_args = ('"%s" scripts/build.py distclean %s install_ext check_sdk' % (sys.executable, install_sdk)).split()
 
     cmd_opts = []
