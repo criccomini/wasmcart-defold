@@ -303,6 +303,28 @@ c++ -std=c++11 -Wall -Wextra -Werror \
 /tmp/test_wasmcart_save
 ```
 
+## Polygon offset
+
+`render.set_polygon_offset(factor, units)` preserves fractional and negative
+values through the render command buffer. Its operands carry the original
+32-bit float bits, using the same representation as the depth-clear command.
+Numeric integer conversions previously truncated fractions and could invoke
+undefined behavior for negative or large values.
+
+The focused host regression needs a C++ compiler, `pkg-config`, and LuaJIT:
+
+```sh
+python3 scripts/test_polygon_offset_host.py
+```
+
+It compiles the production Lua binding, command constructors, queue insertion,
+and polygon-offset parser case with address and undefined-behavior sanitizers.
+It checks exact values delivered to a graphics test double, including fractions,
+negative values, signed zero, float extrema and subnormals, plus Lua error paths.
+`LUA_PKG_CONFIG` can select another Lua 5.1-compatible package. This test does not
+build the full engine or exercise GPU rasterization. The render-script engine
+suite also covers fractional and negative command operands.
+
 ## Rumble
 
 The wasmcart engine exposes these Lua functions:

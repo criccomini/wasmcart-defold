@@ -187,7 +187,11 @@ namespace dmRender
                 }
                 case COMMAND_TYPE_SET_POLYGON_OFFSET:
                 {
-                    dmGraphics::SetPolygonOffset(context, (float)c->m_Operands[0], (float)c->m_Operands[1]);
+                    union float_to_uint32_t {float f; uint32_t i;};
+                    float_to_uint32_t factor_bits, units_bits;
+                    factor_bits.i = c->m_Operands[0];
+                    units_bits.i = c->m_Operands[1];
+                    dmGraphics::SetPolygonOffset(context, factor_bits.f, units_bits.f);
                     break;
                 }
                 case COMMAND_TYPE_DRAW:

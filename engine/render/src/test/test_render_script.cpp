@@ -508,9 +508,42 @@ TEST_F(dmRenderScriptTest, TestLuaState)
 
     command = &commands[10];
     ASSERT_EQ(dmRender::COMMAND_TYPE_SET_POLYGON_OFFSET, command->m_Type);
-    ASSERT_EQ(1u, command->m_Operands[0]);
-    ASSERT_EQ(2u, command->m_Operands[1]);
+    ASSERT_EQ(0x3f800000u, command->m_Operands[0]); // 1.0f
+    ASSERT_EQ(0x40000000u, command->m_Operands[1]); // 2.0f
 
+    dmRender::ParseCommands(m_Context, &commands[0], commands.Size());
+
+    dmRender::DeleteRenderScriptInstance(render_script_instance);
+    dmRender::DeleteRenderScript(m_Context, render_script);
+}
+
+TEST_F(dmRenderScriptTest, TestSetPolygonOffsetFractionalAndNegative)
+{
+    const char* script =
+    "function update(self)\n"
+    "    render.set_polygon_offset(0.125, -0.75)\n"
+    "    render.set_polygon_offset(-1.25, -2.5)\n"
+    "    render.set_polygon_offset(-1, -4)\n"
+    "    render.set_polygon_offset(0, -0.0)\n"
+    "end\n";
+    dmRender::HRenderScript render_script = dmRender::NewRenderScript(m_Context, LuaSourceFromString(script));
+    dmRender::HRenderScriptInstance render_script_instance = dmRender::NewRenderScriptInstance(m_Context, render_script);
+
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::UpdateRenderScriptInstance(render_script_instance, 0.0f));
+
+    dmArray<dmRender::Command>& commands = render_script_instance->m_CommandBuffer;
+    ASSERT_EQ(4u, commands.Size());
+    const float offsets[][2] = {{0.125f, -0.75f}, {-1.25f, -2.5f}, {-1.0f, -4.0f}, {0.0f, -0.0f}};
+    for (uint32_t i = 0; i < commands.Size(); ++i)
+    {
+        ASSERT_EQ(dmRender::COMMAND_TYPE_SET_POLYGON_OFFSET, commands[i].m_Type);
+        uint32_t factor_bits, units_bits;
+        memcpy(&factor_bits, &offsets[i][0], sizeof(factor_bits));
+        memcpy(&units_bits, &offsets[i][1], sizeof(units_bits));
+        ASSERT_EQ(factor_bits, commands[i].m_Operands[0]);
+        ASSERT_EQ(units_bits, commands[i].m_Operands[1]);
+    }
     dmRender::ParseCommands(m_Context, &commands[0], commands.Size());
 
     dmRender::DeleteRenderScriptInstance(render_script_instance);

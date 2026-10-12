@@ -2592,7 +2592,11 @@ namespace dmRender
         RenderScriptInstance* i = RenderScriptInstance_Check(L);
         float factor = luaL_checknumber(L, 1);
         float units = luaL_checknumber(L, 2);
-        if (InsertCommand(i, Command(COMMAND_TYPE_SET_POLYGON_OFFSET, (uint64_t)factor, (uint64_t)units)))
+        union float_to_uint32_t {float f; uint32_t i;};
+        float_to_uint32_t factor_bits, units_bits;
+        factor_bits.f = factor;
+        units_bits.f = units;
+        if (InsertCommand(i, Command(COMMAND_TYPE_SET_POLYGON_OFFSET, factor_bits.i, units_bits.i)))
             return 0;
         else
             return luaL_error(L, "Command buffer is full (%d).", i->m_CommandBuffer.Capacity());
