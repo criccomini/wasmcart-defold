@@ -12,8 +12,8 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-// A cart has no filesystem. Live Update's ZIP provider calls dmZip::Open,
-// so keep the whole host asset alive until that provider closes the ZIP.
+// A cart has no filesystem. Live Update's ZIP provider calls dmZip::Open;
+// retain only an owned asset path and size for its bounded read callback.
 
 #include "zip_private.h"
 
@@ -26,17 +26,42 @@ __attribute__((import_module("env"), import_name("wc_asset_size")))
 extern "C" int wc_asset_size(const char* path, unsigned int path_len);
 
 #ifdef __wasm__
-__attribute__((import_module("env"), import_name("wc_load_asset")))
+__attribute__((import_module("env"), import_name("wc_read_asset_range")))
 #endif
-extern "C" int wc_load_asset(const char* path, unsigned int path_len,
-                             void* out, unsigned int out_len);
+extern "C" int wc_read_asset_range(const char* path, unsigned int path_len,
+                                   unsigned int offset, void* out,
+                                   unsigned int out_len);
 
 namespace dmZip
 {
 
-static void CloseAsset(void* buffer)
+struct AssetContext
 {
-    free(buffer);
+    unsigned int m_PathLength;
+    unsigned int m_Size;
+    char         m_Path[1];
+};
+
+static void CloseAsset(void* context)
+{
+    free(context);
+}
+
+static size_t ReadAssetAt(FILE* stream, uint64_t offset, void* buffer, size_t size)
+{
+    AssetContext* asset = (AssetContext*)stream;
+    if (!asset || !size || !buffer || offset > asset->m_Size ||
+        size > asset->m_Size - offset)
+        return 0;
+
+    // wc_asset_size returns a nonnegative int, so the bounds above also keep
+    // offset and size representable by the range import's unsigned arguments.
+    int nread = wc_read_asset_range(asset->m_Path, asset->m_PathLength,
+                                    (unsigned int)offset, buffer,
+                                    (unsigned int)size);
+    if (nread < 0 || (size_t)nread > size)
+        return 0;
+    return (size_t)nread;
 }
 
 Result OpenFileRange(FILE*, uint64_t, uint64_t, HZip* zip)
@@ -62,27 +87,22 @@ Result OpenPlatform(const char* path, HZip* zip)
     if (size == 0)
         return RESULT_IO_ERROR;
 
-    void* buffer = malloc((size_t)size);
-    if (!buffer)
+    AssetContext* asset = (AssetContext*)malloc(sizeof(AssetContext) + path_len);
+    if (!asset)
         return RESULT_IO_ERROR;
+    asset->m_PathLength = path_len;
+    asset->m_Size = (unsigned int)size;
+    memcpy(asset->m_Path, path, (size_t)path_len + 1);
 
-    int nread = wc_load_asset(path, path_len, buffer, (unsigned int)size);
-    if (nread != size)
-    {
-        free(buffer);
-        return RESULT_IO_ERROR;
-    }
-
-    // The ZIP reader borrows this buffer; it does not copy it. CloseAsset
-    // runs after zip_close, including when the resource provider rejects the
-    // manifest. Each mount owns its buffer; there is no permanent cache.
-    zip_t* archive = zip_stream_open((const char*)buffer, (size_t)size, 9, 'r');
-    if (!archive)
-    {
-        free(buffer);
-        return RESULT_IO_ERROR;
-    }
-    return OpenArchive(archive, buffer, CloseAsset, zip);
+    // The existing bounded ZIP reader treats this FILE* as opaque and calls
+    // only ReadAssetAt; it never performs FILE operations on the context.
+    // OpenArchive releases it on open failure, or after zip_close on unmount.
+    // Range reads are synchronous and require a STORED outer cart asset.
+    // Inner ZIP extraction/CRC checks are unchanged; range reads do not verify
+    // the outer entry CRC (wc_load_asset remains its full-asset verifier).
+    Result result = OpenFileRangeInternal((FILE*)asset, 0, (uint64_t)size,
+                                          ReadAssetAt, asset, CloseAsset, zip);
+    return result == RESULT_NO_SUCH_ENTRY ? RESULT_IO_ERROR : result;
 }
 
 } // namespace dmZip
