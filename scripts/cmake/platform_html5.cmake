@@ -19,6 +19,11 @@ if(DEFOLD_WASMCART)
   # Must be set for BOTH compile and link.
   target_compile_options(defold_sdk INTERFACE -sSUPPORT_LONGJMP=wasm)
   target_link_options(defold_sdk INTERFACE -sSUPPORT_LONGJMP=wasm)
+
+  # Cart hosts support Wasm bulk memory. Do not lower their copies/fills into
+  # byte loops merely to satisfy the older browser defaults below.
+  target_compile_options(defold_sdk INTERFACE -mbulk-memory)
+  target_link_options(defold_sdk INTERFACE -mbulk-memory)
 endif()
 
 # Common compile-time definitions (mirrors waf_dynamo for web)
