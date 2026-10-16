@@ -776,7 +776,8 @@ namespace dmRender
             list->m_Count = 0;
             return;
         }
-        *list = *value;
+        list->m_Count = value->m_Count;
+        memcpy(list->m_Tags, value->m_Tags, sizeof(dmhash_t) * value->m_Count);
     }
 
     void SetMaterialTags(HMaterial material, uint32_t tag_count, const dmhash_t* tags)
