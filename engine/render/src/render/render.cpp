@@ -625,8 +625,17 @@ namespace dmRender
         {
             RenderListRange& range = ranges[r];
 
-            MaterialTagList taglist;
-            dmRender::GetMaterialTagList(context, range.m_TagListKey, &taglist);
+            if (!range.m_TagListCached || range.m_CachedTagListKey != range.m_TagListKey)
+            {
+                // Registered tag lists never change for a key. Own the active
+                // list for this range instead of repeating a lookup per draw.
+                // Empty/missing lists stay uncached so a later registration in
+                // this frame is observed and missing-key diagnostics still run.
+                dmRender::GetMaterialTagList(context, range.m_TagListKey, &range.m_TagList);
+                range.m_CachedTagListKey = range.m_TagListKey;
+                range.m_TagListCached = range.m_TagList.m_Count > 0;
+            }
+            const MaterialTagList& taglist = range.m_TagList;
 
             range.m_Skip = 0;
             if (tag_count > 0 && !dmRender::MatchMaterialTags(taglist.m_Count, taglist.m_Tags, tag_count, tags))
@@ -719,7 +728,7 @@ namespace dmRender
         {
             context->m_RenderListRanges.SetCapacity(context->m_RenderListRanges.Capacity() + 16);
         }
-        RenderListRange range;
+        RenderListRange range = {};
         range.m_TagListKey = tag_list_key;
         range.m_Start = start;
         range.m_Count = count;

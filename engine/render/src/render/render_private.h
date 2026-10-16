@@ -235,18 +235,21 @@ namespace dmRender
         };
     };
 
+    struct MaterialTagList
+    {
+        uint32_t m_Count;
+        dmhash_t m_Tags[MAX_MATERIAL_TAG_COUNT];
+    };
+
     struct RenderListRange
     {
         uint32_t m_TagListKey;
         uint32_t m_Start;       // Index into the renderlist
         uint32_t m_Count:31;
         uint32_t m_Skip:1;      // During the current draw call
-    };
-
-    struct MaterialTagList
-    {
-        uint32_t m_Count;
-        dmhash_t m_Tags[MAX_MATERIAL_TAG_COUNT];
+        uint32_t m_CachedTagListKey;
+        bool m_TagListCached;
+        MaterialTagList m_TagList; // Owned snapshot; registration can rehash its source table.
     };
 
     struct TextureBinding
